@@ -1,0 +1,846 @@
+---
+title: "Homework 4"
+author: "Nichole Hanus"
+date: "Tuesday, February 09, 2016"
+output: pdf_document
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Set the directory
+setwd("~/2. Courses/36-608 Advanced Data Analysis/HW 4")
+
+# remove annoying npreg messages
+options(np.messages = FALSE)
+
+# Install required libraries and packages
+install.packages("formula.tools", repos = "http://cran.us.r-project.org")
+library(formula.tools) 
+
+# for pretty tables
+install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr) 
+
+# for kernel regression (npreg)
+install.packages("np",dependencies=TRUE, repos = "http://cran.us.r-project.org")
+library(np) 
+
+# Read in North American Mammalian Paleofauna Database (nampd.csv)
+nampd <- read.csv("~/2. Courses/36-608 Advanced Data Analysis/HW 4/nampd.csv", header=TRUE)
+
+# Read in Mass of Mammals data (MoM.txt)
+mom <- read.csv("~/2. Courses/36-608 Advanced Data Analysis/HW 4/MoM.csv", header=TRUE)
+
+```
+
+# 1. Linearly regress log of the new mass on log of ancestral mass
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 1. Linearly regress log of new mass on the log of the ancestral mass
+# Keep the NA positions in the residuals and fitted values, na.exlude
+logMass.lm <- lm(ln_mass ~ ln_old_mass, data = nampd, na.action = na.exclude)
+
+# plot regression line and scatter-plot
+plot(exp(nampd$ln_old_mass), exp(nampd$ln_mass),
+     xlab = "ln_old_mass",
+     ylab = "ln_new_mass",
+     main = "Linear Regression (ln_mass ~ ln_old_mass)")
+abline(logMass.lm, col = "red")
+
+# consider the coefficients 
+kable(coefficients(summary(logMass.lm)), digits = 4)
+
+```
+
+Slope and intercept are interpretted as percent change. A 1% increase in ancestral mass is associated with a 0.99% increase in new mass. Furthermore, the intercept suggests that regardless of ancestral mass growth rates, each new mass is expected to be .14% greater than ancestral mass. 
+
+# 2. Nonparametric regression of log new mass on log ancestral mass
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center',}
+
+options(np.messages = FALSE)
+
+# 2. kernal regression of log new mass on log ancestral mass
+logMass.np <- npreg(ln_mass ~ ln_old_mass, data = nampd, tol=0.01, ftol=0.01)
+
+# check bandwidth compared to ln_old_mass spread
+summary(nampd$ln_old_mass)
+print(logMass.np$bws$fval)
+
+```
+
+We check the bandwidth of our kernel regression and find that 0.5 is reasonable, as ln_old_mass has a spread from 0 to 15.3.
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 2. Create plot showing the data points from problem 1
+plot(exp(nampd$ln_old_mass), exp(nampd$ln_mass),
+     xlab = "ln_old_mass",
+     ylab = "ln_new_mass",
+     main = "Linear Regression vs. NP Regression")
+
+# add linear regression curve
+abline(logMass.lm, col = "red")
+
+# add NP regression curve
+# create dataframe for npreg results
+npreg.oldMASS <- as.vector(logMass.np$eval) #these are ln_old_mass x-values
+npreg.newMass <- as.vector(fitted(logMass.np))
+npreg.df <- data.frame(npreg.oldMASS, npreg.newMass)
+
+# sort dataframe by ascending ln_old_mass
+npreg.df.sort <- npreg.df[order(npreg.oldMASS), ]
+
+# plot npreg line
+lines(exp(npreg.df.sort$ln_old_mass),exp(npreg.df.sort$npreg.newMass), col = "green")
+
+# Add arrows and labels
+text(x=3614135, y=5095317, label="Linear Regression", pos = 4, cex=0.7)
+text(x=3632183, y=1799579, label="NP Regression", pos = 4, cex=0.7)
+
+```
+
+# 3. Bootstrap confidence bands
+## 3.a. Resampling residuals - 95% CI
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 3.a. resampling of residuals, calculate 95% CI bands
+
+# Bundle the two variables into a data frame
+mass.frame <- data.frame(ln_mass=nampd$ln_mass,ln_old_mass=nampd$ln_old_mass)
+
+# to perform regression bootstrapping, remove NA values so that we have
+# equal number of rows for each B (bootstrap) column
+mass.frame <- na.omit(mass.frame)
+
+
+# Resample residuals from original npreg result
+# Inputs: none
+# Output: new data frame of same size as real data
+# Presumes: mass.frame exists (and is a data frame)
+# Exercise: Re-write the bootstrap demo which follows using the functions
+  # from the bootstrap chapter
+resample.residuals <- function() {
+  new.frame <- mass.frame
+  new.new_mass <- fitted(logMass.np) + sample(residuals(logMass.np))
+  new.frame$new_mass <- new.new_mass
+  return(new.frame)
+}
+
+# Perform np regression on 2xn dataframe
+# Inputs: 3xn dataframe, 1st col=y, 2nd col=x (regressor)
+# Outputs: fitted values from np regression
+# Presumes: dataframe input is 2xn, y-values are in 3rd column, regressors in 2nd column
+np.estimator <- function(dataframe){
+  data.np <- npreg(dataframe[,3] ~ dataframe[,2], data = dataframe, 
+                   tol=0.01, ftol=0.01)
+  return(fitted(data.np))
+}
+
+# develop CIs from resampled residuals
+resid.np.cis <- function(B, alpha, existing.np = logMass.np){
+  cases.boots <- replicate(B, np.estimator(resample.residuals()))
+  cis.lower <- 2*fitted(existing.np) - apply(cases.boots, 1, 
+                                            quantile, probs = 1-alpha/2)
+  cis.upper <- 2*fitted(existing.np) - apply(cases.boots, 1, 
+                                            quantile, probs = alpha/2)
+  return(list(lower.ci=cis.lower,upper.ci=cis.upper))
+  }
+
+resid.ci <- as.data.frame(resid.np.cis(B=50, alpha = 0.05, 
+                                       existing.np = logMass.np))
+resid.ci$ln_old_mass <- mass.frame$ln_old_mass
+
+# for the plot, need to sort resid.ci dataframe by ascending ln_old_mass
+resid.ci.sort <- resid.ci[order(resid.ci$ln_old_mass),]
+
+
+# develop plot
+plot(exp(nampd$ln_old_mass), exp(nampd$ln_mass),
+     xlab = "ln_old_mass",
+     ylab = "ln_new_mass",
+     main = "Resampling Residuals")
+
+# plot legend
+legend('topleft', c("95%CI", "2SE", "npreg"), col = c("blue","red","green"), lty=c(1,1,1))
+
+# plot npreg line
+lines(exp(npreg.df.sort$ln_old_mass),exp(npreg.df.sort$npreg.newMass), col = "green")
+
+# add CIs
+lines(exp(resid.ci.sort$ln_old_mass), exp(resid.ci.sort$lower.ci), col = "blue")
+lines(exp(resid.ci.sort$ln_old_mass), exp(resid.ci.sort$upper.ci), col = "blue")
+
+# 3.b. resampling of residuals, calculate standard errors
+
+# calculate standard errors
+resid.np.ses <- function(B, existing.np = logMass.np){
+  cases.boots <- replicate(B, np.estimator(resample.residuals()))
+  se <- apply(cases.boots, 1, sd)
+  se.lower <- fitted(existing.np) - 2*se
+  se.upper <- fitted(existing.np) + 2*se
+  return(list(lower.se=se.lower,upper.se=se.upper))
+  }
+
+resid.se <- as.data.frame(resid.np.ses(B=50, existing.np = logMass.np))
+resid.se$ln_old_mass <- mass.frame$ln_old_mass
+
+# for the plot, need to sort resid.ci dataframe by ascending ln_old_mass
+resid.se.sort <- resid.se[order(resid.se$ln_old_mass),]
+
+# add standard errors
+lines(exp(resid.se.sort$ln_old_mass), exp(resid.se.sort$lower.se), col = "red")
+lines(exp(resid.se.sort$ln_old_mass), exp(resid.se.sort$upper.se), col = "red")
+
+```
+
+
+## 3.c. Resampling cases - 95% CI
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 3.c. Resampling cases to construct 95% CI
+
+# Use resampling dataframe code from lecture 9
+## ----resampling-the-data-frame----
+
+# Resample rows from the mass data frame
+# Inputs: none
+# Output: new data frame of same size as real data
+# Presumes: mass.frame exists (and is a data frame)
+# Exercise: Re-write the bootstrap demo which follows using the functions
+  # from the bootstrap chapter
+mass.resampler <- function() {
+  n <- nrow(mass.frame)
+  resample.rows <- sample(1:n,size=n,replace=TRUE)
+  return(mass.frame[resample.rows,])
+}
+
+# Perform np regression on 2xn dataframe
+# Inputs: 3xn dataframe, 1st col=y, 2nd col=x (regressor)
+# Outputs: fitted values from np regression
+# Presumes: dataframe input is 2xn, y-values are in 1st column, regressors in 2nd column
+mass.np.estimator <- function(dataframe){
+  data.np <- npreg(dataframe[,1] ~ dataframe[,2], data = dataframe, 
+                   tol=0.01, ftol=0.01)
+  return(fitted(data.np))
+}
+
+# develop CIs from resampled cases
+cases.np.cis <- function(B, alpha, existing.np = logMass.np){
+  cases.boots <- replicate(B, mass.np.estimator(mass.resampler()))
+  cis.lower <- 2*fitted(existing.np) - apply(cases.boots, 1, 
+                                            quantile, probs = 1-alpha/2)
+  cis.upper <- 2*fitted(existing.np) - apply(cases.boots, 1, 
+                                            quantile, probs = alpha/2)
+  return(list(lower.ci=cis.lower,upper.ci=cis.upper))
+  }
+
+cases.ci <- as.data.frame(cases.np.cis(B=50, alpha = 0.05, 
+                                       existing.np = logMass.np))
+cases.ci$ln_old_mass <- mass.frame$ln_old_mass
+
+# for the plot, need to sort resid.ci dataframe by ascending ln_old_mass
+cases.ci.sort <- cases.ci[order(cases.ci$ln_old_mass),]
+
+
+# develop plot
+plot(exp(nampd$ln_old_mass), exp(nampd$ln_mass),
+     xlab = "ln_old_mass",
+     ylab = "ln_new_mass",
+     main = "Resampling Cases")
+
+# plot npreg line
+lines(exp(npreg.df.sort$ln_old_mass),exp(npreg.df.sort$npreg.newMass), col = "green")
+
+# add CIs
+lines(exp(cases.ci.sort$ln_old_mass), exp(cases.ci.sort$lower.ci), col = "blue")
+lines(exp(cases.ci.sort$ln_old_mass), exp(cases.ci.sort$upper.ci), col = "blue")
+
+# 3.d. resampling of cases, calculate standard errors
+
+# calculate standard errors
+cases.np.ses <- function(B, existing.np = logMass.np){
+  cases.boots <- replicate(B, mass.np.estimator(mass.resampler()))
+  se <- apply(cases.boots, 1, sd)
+  se.lower <- fitted(existing.np) - 2*se
+  se.upper <- fitted(existing.np) + 2*se
+  return(list(lower.se=se.lower,upper.se=se.upper))
+  }
+
+cases.se <- as.data.frame(cases.np.ses(B=50, existing.np = logMass.np))
+cases.se$ln_old_mass <- mass.frame$ln_old_mass
+
+# for the plot, need to sort resid.ci dataframe by ascending ln_old_mass
+cases.se.sort <- cases.se[order(cases.se$ln_old_mass),]
+
+# add standard errors
+lines(exp(cases.se.sort$ln_old_mass), exp(cases.se.sort$lower.se), col = "red")
+lines(exp(cases.se.sort$ln_old_mass), exp(cases.se.sort$upper.se), col = "red")
+
+# plot legend
+legend('topleft', c("95%CI", "2SE", "npreg"), col = c("blue","red","green"), lty=c(1,1,1))
+
+```
+
+
+## 3.e. Do +/- 2 S.E. bars match 95% CIs?
+
+Since mass is a physical measurement, it seems reasonable that it would have a normal distribution. Therefore, the 95% CI bands should be close to the +/- 2 se bars.
+
+The +/- 2 se bars are similar to the 95% CI confidence bands when resampling residuals. However, they are not exactly equal to the 95% CI confidence bands. The plot for the resampling cases seems to be wrong. However, it would make sense if the +/- 2 se bars are closer to the 95% CI for this case. Since the resampling residuals method puts bias on the first regression, which could be mispecified and not normal. The resampling cases provides opportunity for the residuals to approach normality over many replications.
+
+
+
+# 4. rmass function
+
+## 4.a. Needed parameters
+Our rmass function needs the following parameters: ancestral mass (exp(ln_old_mass)), xmin (grams), xmax (grams), sigma squared, and mean.
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 4. write rmass function
+
+#pull out sample X.a
+X.a <- exp(mass.frame[1,2])
+
+# Calculates Xd using xd = exp(r(logXa)+Z)
+# Where Z ~ N(0, sq.sigma)
+# Xd has to be between xmin=1.8grams and xmax=10^5 grams
+# Inputs: Xa data, not log 
+#         xmin = 1.8 grams
+#         xmax = 10^15 grams
+#         sq.simga = 0.63
+# Outputs: single random value for Xd, between the limits
+# Presumes: data input is not log
+
+x.min <- 1.8
+x.max <- 10^15
+
+rmass <- function(X.a, xmin=x.min, xmax=x.max, mean=0, sq.sigma=0.63){
+  X.d <- 0
+  while (X.d < xmin || X.d > xmax){
+  r <- predict(logMass.np, log(X.a))$fit[1]
+  z <- rnorm(1, mean, sq.sigma)
+  X.d <- exp(r+z)
+  }
+  return(X.d)
+}
+
+
+# 4.b. check by repeated simulation that X.d produces X.d values between our
+# min and max values
+simulations <- replicate(50, rmass(runif(1, min=1.8, max=10^15)))
+print(min(simulations))
+print(max(simulations))
+
+
+
+
+```
+
+## 4.b. We see that the output from 200 simulated runs is witin our min=1.8g and max=10^5g.
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 4.c. Create 150 evenly spaced X.a values
+
+# create vector of 150 evenly spaced X.a values ranging from the min to the max value
+# use code from Lecture 9
+
+grid.150 <- seq(from=log(x.min),to=log(x.max),length.out=150)
+x.d.sim <- sapply(exp(grid.150), rmass)
+
+# use x.d.sim to fit np regression curve
+grid.np <- npreg(grid.150 ~ x.d.sim)
+print(grid.np$bws$fval)
+# compare to grid.150 spread
+print("min simulated mass")
+print(exp(min(grid.150)))
+print("max simulated mass")
+print(exp(max(grid.150)))
+      
+
+# compare to original regression
+print(logMass.np$bws$fval)
+# compare to spread of regressors
+print("min observed mass")
+print(exp(min(logMass.np$eval)))
+print("max observed mass")
+print(exp(max(logMass.np$eval)))
+
+```
+
+## 4.c. Comparable regressions?
+We compare the bandwidths of the np regression on the observed data to that of the simulated data. Since the simulated data has a much broader range (reaching 10^15 grams), the bandwidth is appropriately larger for the np regression ~ 98. The observed mass only reaches magnitudes of 10^5 and the bandwidth is ~0.5, which is appropriate. 
+
+# 5. origin function
+
+## 5.a. Check origin by simulation
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 5. write origin function
+
+# Calculates Xd using xd = exp(r(logXa)+Z)
+# Where Z ~ N(0, sq.sigma)
+# Xd has to be between xmin=1.8grams and xmax=10^5 grams
+# Inputs: Xa vector, not log
+#         xmin = 1.8 grams
+#         xmax = 10^15 grams
+#         sq.simga = 0.63
+# Outputs: two Xd values (Xd1 and Xd2) and an updated Xa vector
+# Presumes: data input is not log
+
+origin <- function(Xa.vector, xmin=x.min, xmax=x.max, mean=0, sq.sigma=0.63){
+  X.d1 <- 0
+  X.d2 <- 0
+  while (X.d1 < xmin || X.d1 > xmax || X.d2 < xmin || X.d2 > xmax){
+  r <- predict(logMass.np, log(Xa.vector[1]))$fit[1]
+  z <- rnorm(2, mean, sq.sigma)
+  X.d1 <- exp(r+z[1])
+  X.d2 <- exp(r+z[2])
+  }
+  Xa.vector[1] <- X.d1
+  n <- length(Xa.vector)
+  Xa.vector[n+1] <- X.d2
+  return(Xa.vector)
+}
+
+# 5.a. check by repeated simulation that neither component of the returned value matches the ancestral mass
+
+origin.sim <- replicate(200, origin(as.vector(exp(mass.frame[1,2]))))
+
+# check to see if X.a matches any X.d1 or X.d2
+
+X.d1 <- as.vector(origin.sim[1,])
+X.d2 <- as.vector(origin.sim[2,])
+
+X.a <- as.vector(array(exp(mass.frame[1,2]), length(X.d1)))
+
+# check if X.d1 and X.a are equal
+print(identical(X.d1, X.a))
+
+# check if X.d2 and X.a are equal
+print(identical(X.d2, X.a))
+
+
+# check to see if X.d1 and X.d2 have same marginal distribution
+hist(X.d1)
+summary(X.d1)
+hist(X.d2)
+summary(X.d2)
+ks.test(X.d1,X.d2)
+qqplot(X.d1, X.d2, xlab = "X.d1", ylab = "x.d2",
+       main = "q-q plot of origin output")
+
+
+# check to see if X.d1 and X.d2 are correlated
+print(cor(X.d2, X.d1))
+
+```
+
+We see that X.a is not equal to X.d1 or X.d2 in any of the simulations. We also find the summaries of each of these distributions to be quite similar. However, we find a non-significant p-value when performig the Kolmogorvo-Smirnov test. Yet, when plotting both X.d1 and X.d2 on a q-q plot we see a nearly linear relationship.
+
+We also see a very low correlation value between X.d1 and X.d2, suggesting they are not correlated. 
+
+## 5.b. Check output vector length increases by 1
+We simulate 200 vectors of length 2 and 5 and find our output increases for each by 1.
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 5.b. check length of output vectors
+
+# try m = 2
+m1 <-2
+origin.sim.m1 <- replicate(200, origin(as.vector(runif(m1, min = 1.8, max=10^5))))
+length.sim.m1 <- nrow(origin.sim.m1)
+print(length.sim.m1)
+
+# try m = 5
+m2 <-5
+origin.sim.m2 <- replicate(200, origin(as.vector(runif(m2, min = 1.8, max=10^5))))
+length.sim.m2 <- nrow(origin.sim.m2)
+print(length.sim.m2)
+
+```
+
+## 5.c. Test m-1 values for simulated
+We use the identical function in r to compare a vector of X.a values to those of simulated values and found equal values for the m-1 positions of both vectors.
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 5.c. check that m-1 entries in the output match the input exactly
+
+# try m = 4
+m3 <-4
+m3.vector <- as.vector(runif(m3, min = 1.8, max=10^5))
+origin.sim.m3 <- replicate(200, origin(m3.vector))
+
+sim.d <- as.vector(origin.sim.m3[(m3-1),])
+sim.a <- as.vector(array(m3.vector[m3-1], length(sim.d)))
+print(identical(sim.d, sim.a))
+
+# try m = 6
+m4 <-6
+m4.vector <- as.vector(runif(m4, min = 1.8, max=10^5))
+origin.sim.m4 <- replicate(200, origin(m4.vector))
+
+sim.d2 <- as.vector(origin.sim.m4[(m4-1),])
+sim.a2 <- as.vector(array(m4.vector[m4-1], length(sim.d)))
+print(identical(sim.d2, sim.a2))
+
+```
+
+# 6. extinct.prob
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 6. write extinct.prob function
+
+# Calculates extinction probabilities 
+# pe(x) = beta*X^p
+# 
+# Inputs: vector of species masses, X
+#         beta = 1/5000
+#         p = 0.025
+# Outputs: extinction probbability
+# Presumes: data input is a vector
+
+extinct.prob <- function(X, p = 0.025, beta = 1/5000){
+  prob <- beta*X^(p)
+  return(prob)
+}
+  
+# 6.a. Check for correct outputs given c(100, 1600, 10000)
+X<- c(100, 1600, 10000)
+probs <- extinct.prob(X, p = .5, beta = 1/200)
+print(probs)
+
+# compare to manual calculations
+p = 0.5
+beta = 1/200
+
+prob1 <- beta*100^(p)
+print(prob1)
+prob2 <- beta*1600^(p)
+print(prob2)
+prob3 <- beta*10000^(p)
+print(prob3)
+
+```
+
+## 6.a. Correct values?
+We see the manual calculation of the probabilities over the three masses equals the same as entering the three masses into the extinct.prob function.
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 6.b. check if p=0 that output probabilities are beta no matter the masses
+# set beta = 1/5000
+probs.p0 <- replicate(30, extinct.prob(runif(1, min = 1.8, max = 9000), p=0, beta = 1/5000))
+beta <- as.vector(array(1/5000, length(probs.p0)))
+print(identical(beta, probs.p0))
+
+# 6.c. equal input masses, equal probs
+X.E <- c(20,20,20,20)
+
+probs.E1 <- extinct.prob(X.E, p = 0.5, beta = 1/5000)
+probs.E2 <- extinct.prob(X.E, p = 0.2, beta = 1/1000)
+probs.E3 <- extinct.prob(X.E, p = 0.8, beta = 1/200)
+
+print(probs.E1)
+print(probs.E2)
+print(probs.E3)
+# we see equal probs given a specified set of p and beta
+
+# 6.d if p DNE 0 and beta DNA 0, and all masses are different, returned probs differ
+X.NE <- c(20, 30, 40, 50)
+probs.NE <- extinct.prob(X.NE, p = 0.5, beta = 1/5000)
+print(probs.NE)
+# we see distinct probabilities for varying masses
+
+```
+
+# 7. extinction function
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 7. write extinction function
+
+# Removes extinct species
+# # Inputs: vector of species masses, X
+#         beta = 1/5000
+#         p = 0.025
+# Outputs: vector of masses that are not extinct
+# Assume "extinct" means prob = 1
+# Presumes: data input is a vector
+
+extinction <- function(X, p = 0.025, beta = 1/5000){
+  output <- X
+  prob <- beta*X^(p)
+  output <- data.frame(output, prob)
+  ones <- as.vector(array(1, nrow(output)))
+  if(identical(prob, ones)){
+    output <- ("all extinct")
+  } 
+    else {
+      output <- output[! output$prob %in% 1,]
+      output$prob <- NULL
+    }
+  
+  return(output)
+}
+
+# 7.a. Check if Beta=0 that output equals input
+# try 4 dinstinct input vectors of lengths 3, 5, 6, and 8
+L1 <- seq(1,3)
+L2 <- seq(1,5)
+L3 <- seq(1,6)
+L4 <- seq(1,8)
+print(L1)
+print(L2)
+print(L3)
+print(L4)
+
+P1 <- extinction(L1, p = 0.025, beta = 0)
+P2 <- extinction(L2, p = 0.025, beta = 0)
+P3 <- extinction(L3, p = 0.025, beta = 0)
+P4 <- extinction(L4, p = 0.025, beta = 0)
+print(P1)
+print(P2)
+print(P3)
+print(P4)
+
+# 7.b. Case where p and beta are equal to 1/2
+# is length of vector half?
+
+# create a case where all the input masses are equal
+X.5 <- c(30, 30, 30, 30, 30, 30, 30, 30)
+input.size <- length(X.5)
+
+# find a combo of p & B so that extinction prob = 0.5
+# set beta = 1/5000
+B <- 1/5000
+x <- 30
+p.exp <- log(0.5)/(log(B)+log(x))
+
+# set aside
+
+
+```
+
+\break
+# 8. evolve_step function
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 8. evolve_step function
+
+# Uses origin and extinction to develop new vector of species
+# # Inputs: vector of species masses, X
+#         beta = 1/5000
+#         p = 0.025
+#         mean
+#         sq.sigma
+#         xmin
+#         xmax
+#
+# Outputs: vector of new masses
+# # Presumes: origin and extinction functions exist
+
+X.test <- c(20, 30, 50, 40, 20)
+
+evolve_step <- function(X, p = 0.025, beta = 1/5000,
+                        mean = 0, sq.sigma = 0.63,
+                        xmin = 1.8,
+                        xmax = 10^15){
+              live.mass <- extinction(X, p, beta)
+              evolve.mass <- origin(X, xmin, xmax, mean, sq.sigma)
+              return(evolve.mass) 
+                        }
+
+# to test if it should work, we develop this scenario
+X.test <- c(20, 30, 50, 40, 20)
+# we expect the returned vector to replace the first element
+# per the origin function
+# and we also expect the last element of the vector to be an augmented value
+# the length of the returned vector could be any length, due to the prob of extiction
+
+evolve.test1 <- evolve_step(X.test)
+evolve.test2 <- evolve_step(X.test)
+evolve.test3 <- evolve_step(X.test)
+
+print(evolve.test1)
+print(evolve.test2)
+print(evolve.test3)
+
+```
+
+\break
+# 9. mass_evolve function
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+# 9. mass_evolve function
+
+# Uses origin and extinction to develop new vector of species, with T iterations
+# # Inputs: vector of species masses, X
+#           beta = 1/5000
+#           p = 0.025
+#           mean
+#           sq.sigma
+#           xmin
+#           xmax
+#           T = number of iterations
+#
+# Outputs: vector of new masses
+# # Presumes: origin and extinction functions exist
+
+mass_evolve <- function(t=5, X = X.test, p = 0.025, beta = 1/5000,
+                        mean = 0, sq.sigma = 0.63,
+                        xmin = 1.8,
+                        xmax = 10^15){
+                          
+              for (i in 1:t){
+              live.mass <- extinction(X, p, beta)
+              evolve.mass <- origin(X, xmin, xmax, mean, sq.sigma)
+                           }
+              return(evolve.mass) 
+                        }
+# we expect the returned vector to replace the first element
+# per the origin function
+# and we also expect the last element of the vector to be an augmented value
+# the length of the returned vector could be any length, due to the prob of extiction
+# since we can iterate several times, we might see that the output vector is shorter
+# than the input vector
+
+# perform similar as 7.b
+X.5 <- c(30, 30, 30, 30, 30, 30, 30, 30)
+
+
+mass_evolve.test <- mass_evolve(t=20, X = X.5, p = 0.5, beta = 1/5000,
+                        mean = 0, sq.sigma = 0.63,
+                        xmin = 1.8,
+                        xmax = 10^15)
+print(mass_evolve.test)
+
+```
+
+\break
+# 10. Comparing simulations to each other
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+options(np.messages = FALSE)
+
+#10.a. Run mass_evolve starting with single species with mass 120
+# run T=2*10^5 times
+
+x.120 <- as.vector(120)
+masses.1 <- mass_evolve(t=1000, X = x.120, p = 0.5, beta = 1/5000,
+                        mean = 0, sq.sigma = 0.63,
+                        xmin = 1.8,
+                        xmax = 10^15)
+hist(log(masses.1))
+
+#10.b
+masses.2 <- mass_evolve(t=1000, X = x.120, p = 0.5, beta = 1/5000,
+                        mean = 0, sq.sigma = 0.63,
+                        xmin = 1.8,
+                        xmax = 10^15)
+hist(log(masses.2))
+
+# 10.c
+masses.3 <- mass_evolve(t=1500, X = x.120, p = 0.5, beta = 1/5000,
+                        mean = 0, sq.sigma = 0.63,
+                        xmin = 1.8,
+                        xmax = 10^15)
+hist(log(masses.3))
+
+# 10.d
+x.d <- c(40, 1000)
+masses.4 <- mass_evolve(t=1000, X = x.d, p = 0.5, beta = 1/5000,
+                        mean = 0, sq.sigma = 0.63,
+                        xmin = 1.8,
+                        xmax = 10^15)
+hist(log(masses.4))
+masses.5 <- mass_evolve(t=1000, X = x.d, p = 0.5, beta = 1/5000,
+                        mean = 0, sq.sigma = 0.63,
+                        xmin = 1.8,
+                        xmax = 10^15)
+hist(log(masses.5))
+
+```
+
+\break
+# 11. Comparing simulations to reality
+## 11.a histogram
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 11.a Load masses of mammals data set and plot histogram of masses for land species
+hist(log(mom$mass), main = "Distribution of MOM land mass",
+     xlab = "ln.Mass")
+
+```
+
+## 11.b description
+I did not complete part 10. However, we see a slightly left skewed distribution of log masses for the land mammals. 
+
+## 11.c q-q plots
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, out.width="0.48\\textwidth"}
+
+# 11.c q-q plots for each distribution
+
+qqplot(log(mom$mass), log(masses.1))
+qqplot(log(mom$mass), log(masses.2))
+qqplot(log(mom$mass), log(masses.3))
+qqplot(log(mom$mass), log(masses.4))
+qqplot(log(mom$mass), log(masses.5))
+
+
+```
+
+
+## 12. Does output of simulation match observed masses?
+I shortened my t-iterations to 1,000 due to the longer iterations taking longer than I had to submit this hw (never using kernel regression again for simulations!). It looks like my mass_evolve function was not returning the correct output for these simulations. Rather, I was only getting vectors of the length entered... therefore, my masses were not evolving. I would expect the distributions of the longer runs to match the actual observed distributions closer than the shorter runs. Furthermore, I would expect the distributions with two mass inputs for species to also match the observed distribution more closely. The greater the number of species inputs entered into the massevolve function, the closer to reality the output will be. Entering a single mass value into the function should not produce vast differences in results due to the origin function basing predictions on the kernel regressions. 
+
+
+
+
+
+
+
+
+
+
+

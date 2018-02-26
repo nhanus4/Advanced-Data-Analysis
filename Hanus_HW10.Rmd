@@ -1,0 +1,377 @@
+---
+title: "Homework 10"
+author: "Nichole Hanus"
+date: "Saturday, April 02, 2016"
+output: pdf_document
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Set the directory
+setwd("~/2. Courses/36-608 Advanced Data Analysis/HW 10")
+
+
+# for pretty tables
+install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr) 
+
+
+# Read fake-smoke data
+data(cheating)
+
+```
+
+# 1. Considering DAG from Figure 1.
+
+## 1.a. Paths linking X and Y
+
+No conditioning: \
+$X \rightarrow Y$ \
+
+
+Conditioning on Z: \
+$X \rightarrow Z \leftarrow Y$ and $X \rightarrow Y$
+
+## 1.b. Coefficients:
+
+The population coefficient for a linear regression of Y on X alone: \
+
+\begin{align}
+\beta = \frac{Cov(X,Y)}{Var(X)} = \frac{\alpha * 1}{1} = \alpha \nonumber
+\end{align}
+
+The population coefficient for a linear regression of Y on X when also regressing on Z: \
+
+\begin{align}
+\beta &= \frac{Cov(X,Y)}{Var(X)} \nonumber \\
+&= \alpha * Var(X) + \frac{\beta_{1}}{\beta_{2}}*Var(X) \nonumber  \\
+&= \alpha * 1 + \frac{\beta_{1}}{\beta_{2}}*1 \nonumber  \\
+&= \alpha + \frac{\beta_{1}}{\beta_{2}} \nonumber
+\end{align}
+
+
+## 1.c. Paths linking X and Z
+No conditioning: \
+$X \rightarrow Z$ \
+$X \rightarrow Y \rightarrow Z$ \
+
+Conditioning on Y: \
+$X \rightarrow Z$ 
+
+## 1.d. Coefficients
+The population coefficient for a linear regression of Z on X alone: 
+
+\begin{align}
+\beta &= \beta_{1}*Var(X) + (\alpha  \beta_{2})*Var(X) \nonumber \\ 
+&= \beta_{1}*1 + (\alpha * \beta_{2})*1 \nonumber \\
+&= \beta_{1} + (\alpha * \beta_{2}) \nonumber
+\end{align}
+
+The population coefficient for a linear regression of Z on X when also regressing on Y: \
+
+\begin{align}
+\beta &= \beta_{1}*Var(X) \nonumber \\ 
+\beta &= \beta_{1}*1 \nonumber \\ 
+\beta &= \beta_{1} \nonumber
+\end{align}
+
+
+
+#2. Consider DAG from Figure 2.
+
+##2.a. Paths linking X to Y:
+Paths linking X to Y, no conditioning: \
+$X \rightarrow Q \rightarrow Y$ \
+$X \rightarrow R \rightarrow Y$ \
+$X \rightarrow R \rightarrow Q \rightarrow Y$ \
+$X \leftarrow U \rightarrow Y$ \
+
+
+Paths linking X to Y, conditioning on U: \
+$X \rightarrow Q \rightarrow Y$ \
+$X \rightarrow R \rightarrow Y$ \
+$X \rightarrow R \rightarrow Q \rightarrow Y$ \
+
+
+Paths linking X to Y, conditioning on R: \
+$X \leftarrow U \rightarrow Y$ \
+$X \rightarrow Q \rightarrow Y$ \
+
+
+Paths linking X to Y, conditioning on Q: \
+$X \leftarrow U \rightarrow Y$ \
+$X \rightarrow R \rightarrow Y$ \
+$X \rightarrow Q \leftarrow R \rightarrow Y$ \
+
+
+Paths linking X to Y, conditioning on R and Q: \
+$X \leftarrow U \rightarrow Y$ \
+
+
+Paths linking X to Y, conditioning on U, R and Q: None.
+
+## 2.b. Paths linking R to Y:
+
+Path from R to Y, no conditioning: \
+$R \rightarrow Y$ \
+$R \rightarrow Q \rightarrow Y$ \
+$R \leftarrow X \leftarrow U \rightarrow Y$ \
+
+
+Path from R to Y, conditioning on X: \
+$R \rightarrow Y$ \
+$R \rightarrow Q \rightarrow Y$ \
+
+
+Path from R to Y, conditioning on X and U: \
+$R \rightarrow Y$ \
+$R \rightarrow Q \rightarrow Y$ \
+
+
+Path from R to Y, conditioning on X, Q and U: \
+$R \rightarrow Y$ 
+
+## 2.c. List all paths linking X to Q:
+
+Path from X to Q, no conditioning: \
+$X \rightarrow Q$ \
+$X \rightarrow R \rightarrow Q$ \
+
+
+Path from X to Q, conditioning on Y: \
+$X \rightarrow Q$ \
+$X \rightarrow R \rightarrow Q$ \
+$X \rightarrow R \rightarrow Y \leftarrow Q$ \
+$X \leftarrow U \rightarrow Y \leftarrow R \rightarrow Q$ \
+$X \leftarrow U \rightarrow Y \leftarrow Q$ \
+
+
+Path from X to Q, conditioning on U: \
+$X \rightarrow R \rightarrow Q$ \
+$X \rightarrow Q$ \
+
+
+Path from X to Q, conditioning on U and Y: \
+$X \rightarrow R \rightarrow Q$ \
+$X \rightarrow Q$ \
+$X \rightarrow R \rightarrow Y \leftarrow Q$ \
+
+
+Path from X to Q, conditioning on R: \
+$X \rightarrow Q$ \
+
+
+Path from X to Q, conditioning on R and Y: \
+$X \rightarrow Q$ \
+$X \leftarrow U \rightarrow Y \leftarrow Q$ 
+
+## 2.d. Find the population coefficients for a linear regression of Y on R and Q:
+
+$Y = \beta_{1} R + \beta_{2} Q + e$
+
+Where:
+\begin{align}
+\beta_{1} &= \delta_{1}*Var(R) + (\delta_{2} \gamma_{2})*Var(R) \nonumber
+\end{align}
+
+and
+
+\begin{align}
+\beta_{2} &= \delta_{2}*Var(Q) + \frac{\delta{1}}{\gamma_{2}}*Var(R) \nonumber
+\end{align}
+
+## 2.e. Find the population coefficients for a linear regression of Y on R,Q, and X:
+
+$Y = \beta_{1} R + \beta_{2} Q +\beta_{3} X +  e$
+
+Where:
+\begin{align}
+\beta_{1} &= \delta_{1}*Var(R) + (\delta_{2} \gamma_{2})*Var(R) + (\beta\gamma_{1}\delta_{2})*Var(R) + \frac{\delta_{3}}{\beta*\alpha} * Var(U) \nonumber
+\end{align}
+
+and
+
+\begin{align}
+\beta_{2} &= \delta_{2}*Var(Q) + \frac{\delta{1}}{\gamma_{2}}*Var(R) + \frac{\beta}{\gamma_{1}}*\delta_{1}*Var(X) + \frac{\delta_{3}}{\alpha\gamma_{1}}*Var(U) \nonumber
+\end{align}
+
+and
+
+\begin{align}
+\beta_{3} &= (\beta\delta_{1})*Var(X) + (\gamma_{1}\delta_{1})*Var(X) + (\beta\gamma_{2}\delta_{2})*Var(X)+(\frac{\gamma_{1}}{\gamma_{2}}\delta_{1})*Var(X) + (\frac{\delta_{3}}{\alpha})*Var(U) \nonumber
+\end{align}
+
+## 2.f. Find the population coefficients for a linear regression of Y on X, alone:
+
+$Y = \beta_{1} X +  e$
+
+Where:
+
+\begin{align}
+\beta_{1} &= (\beta\delta_{1})*Var(X) +(\beta\gamma_{2}\delta_{2})*Var(X) +(\gamma_{1}\delta_{2})*Var(X) + (\frac{\delta_{3}}{\alpha})*Var(U)  \nonumber
+\end{align}
+
+## 2.g. Find the population coefficients for a linear regression of R on X:
+
+$R = \beta_{1} X +  e$
+
+Where:
+
+\begin{align}
+\beta_{1} &= \beta * Var(X) \nonumber
+\end{align}
+
+## 2.h. Find the population coefficients for a linear regression of Q on X and R:
+
+$Q = \beta_{1} X + \beta_{2} R + e$
+
+Where:
+
+\begin{align}
+\beta_{1} &= \gamma_{1} *Var(X) + (\beta\gamma_{2})*Var(X)   \nonumber
+\end{align}
+
+and:
+
+\begin{align}
+\beta_{2} &= \gamma_{2} *Var(R) + \frac{\gamma_{1}}{\beta} Var(X)   \nonumber
+\end{align}
+
+
+# 3. Consider the DAG from Figure 3.
+
+## 3.a. Smoking and Cancer dependence
+Smoking and cancer are depenent, because cancer is a causal descendent of smoking.
+
+## 3.b. All variables  to make cancer and smoking statistically independent:
+1. {tar, asbestos} \
+2. cellular damage \
+3. {occupation prestige, tar} \
+
+## 3.c. Restoring dependence...
+If we have a set of variables which make smoking and cancer statistically independent, we cannot restore the dependence from this DAG. We do not have any paths that move through Yellowing of Teeth (a collider with which we could control) to cancer that doesn't move through other variables that would make smoking and cancer statistically independent.
+
+## 3.d. Conditioning tricks...
+To make yellowing of teeth independent of asbestos exposure, we need to control for occupational prestige. To restore their dependence, we would need to control for cellular damage. To make them independent again, we would need to control for EITHER tar or smoking. 
+
+# 4. Fake-smoke data
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4. read in the smoke data
+smoke <- read.csv("~/2. Courses/36-608 Advanced Data Analysis/HW 10/fake-smoke.csv", header=TRUE)
+
+```
+
+## 4.a. Logistic regression of cancer on smoking
+
+\begin{align}
+logit(Cancer) &= \beta_{0} + \beta_{1}*Smoking \nonumber 
+\end{align}
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+# 4.a. Run a logistic regression of cancer on smoking
+logr1 <- glm((cancer > 0) ~ smoking, data = smoke, family = "binomial")
+
+kable(summary(logr1)$coef, digits = 3)
+
+# consider a one-unit increase in "smoke" - go from 1 smoke to 2 smoke
+percent.inc1 <- (exp(logr1$coefficients[1] + logr1$coefficients[2]*2)/exp(logr1$coefficients[1] + logr1$coefficients[2]*1))*100
+
+# same as taking the exponent of the coefficient
+# percent.inc <- (exp(logr1$coefficients[2]))*100
+
+```
+
+The coefficient for the independent variable, smoking, is significant at the 5% significance level. An intercept of `r round(logr1$coefficients[2], digits = 3) ` is interpretted as an increase in smoking one pack a day increases the logOdds of cancer by 1.285. Therefore, an increase of smoking one pack a day increases the probability of cancer by `r round(percent.inc1, digits = 0) `%.
+
+## 4.b. Logistic regression of cancer on smoking, controlling for yellow teeth
+
+\begin{align}
+logit(Cancer|Teeth) &= \beta_{0} + \beta_{1}*Smoking + \beta_{2}*Teeth \nonumber 
+\end{align}
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4.b. Run a logistic regression of cancer on smoking, controlling for yelowing of teeth
+logr2 <- glm((cancer > 0) ~ smoking + teeth, data = smoke, family = "binomial")
+
+kable(summary(logr2)$coef, digits = 3)
+
+# consider a one-unit increase in "smoke" - go from 1 smoke to 2 smoke
+percent.inc2 <- (exp(logr2$coefficients[2]))*100
+
+```
+
+When controlling for yellowing of teeth, we still find a significant effect of smoking on cancer at the 5% significance level. Here we see a coefficient of `r round(logr2$coefficients[2], digits = 3) `; an increase in smoking of one pack a day is associated with a `r round(percent.inc2, digits = 0) `% increase in the probability of cancer. Therefore, controlling for yellowing of teeth increases the effect we observe of smoking on cancer. 
+
+## 4.c. Logistic regression of cancer on smoking, controlling for asbestos
+
+\begin{align}
+logit(Cancer|Asbestos) &= \beta_{0} + \beta_{1}*Smoking + \beta_{2}*Asbestos \nonumber 
+\end{align}
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4.c. Run a logistic regression of cancer on smoking, controlling for asbestos exposure
+logr3 <- glm((cancer > 0) ~ smoking + asbestos, data = smoke, family = "binomial")
+
+
+kable(summary(logr3)$coef, digits = 3)
+
+
+# consider a one-unit increase in "smoke" - go from 1 smoke to 2 smoke
+percent.inc3 <- (exp(logr3$coefficients[2]))*100
+
+```
+
+When controlling for asbestos exposure, we still find a significant effect of smoking on cancer at the 5% significance level. Here we see that a coefficient of `r round(logr3$coefficients[2], digits = 3) `; an increase in smoking of one pack a day is associated with a `r round(percent.inc3, digits = 0) `% increase in the probability of cancer. Therefore, controlling for asbestos exposure decreases the effect we observe of smoking on cancer. 
+
+## 4.d. Logistic regression of cancer on all covariates
+
+\begin{align}
+logit(Cancer) &= \beta_{0} + \beta_{1}*Cellular + \beta_{2}*Tar + \beta_{3}*Teeth +  \nonumber \\ 
+&\beta_{4}*Dental + \beta_{5}*Smoking + \beta_{6}*Asbestos + \beta_{7}*Occupation \nonumber 
+\end{align}
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4.d. Run a logistic regression of cancer on all covariates
+logr4 <- glm((cancer > 0) ~ cellular + tar + teeth + dental + smoking + asbestos + occupation, data = smoke, family = "binomial")
+
+kable(summary(logr4)$coef, digits = 3)
+
+# consider a one-unit increase in "smoke" - go from 1 smoke to 2 smoke
+percent.inc4 <- (exp(logr4$coefficients[1] + logr4$coefficients[2]*2)/exp(logr4$coefficients[1] + logr4$coefficients[2]*1))*100
+
+
+```
+
+
+When running a logistic regression of cancer on all covariates, we do not find a significant effect of smoking on cancer at the 5% significance level. We find a coefficient of `r round(logr4$coefficients[6], digits = 3) ` which is meaningless.
+
+## 4.e Doctor's statistic...
+
+The regression that is most suitable for the doctors is the second regression (regressing Cancer on Smoking, controlling for yellow teeth). This is because the doctor has a good inventory of whether or not the patient smokes (e.g. standard question) and the doctor is also able to easily observe yellow teeth on the patient. By knowing these two variables, the dotor is able to assess the patient's risk of cancer more accurately.
+
+
+## 4.f Insurance Lawyer's statistic...
+
+Perhaps the first regression, which only considers the smoking habits, is the only feasible statistic for the insurance company lawyer to consider. These lawyer's cannot assess teeth color and residents of homes might not be aware of whether or not they are exposed to asbestos. Therefore, the insurance company can only reasonably assess cancer risks through reported smoking habits. 
+
+# 5. Consider the DAG from Figure 4
+
+## 5.a. Conditional independence for Figure 4 but not Figure 3
+
+A conditional independence that holds in Figure 4 but not in Figure 3 would be the amount of tar in lungs and cancer. In Figure 4, if you condition for cellular damage, then tar and cancer become statistically independent. However, in Figure 3 if you control for cellular damage, then tar and cancer are dependent. 
+
+## 5.b. Conditional independence for Figure 3 but not Figure 4
+
+No. The only difference between these two DAGs is the causal link between tar in lungs and cellular damage. Therefore, the only conditional independence change that you can make is by conditioning on cellular damage. In figure 3, this increases the number of dependencies and does not add any conditional independencies. 
+
+## 5.c. Did data come from Figure 3 or Figure 4?
+
+This data came from Figure 3; otherwise, we wouldn't have observed the drop in the smoking coefficient when adding the asbestos control. 

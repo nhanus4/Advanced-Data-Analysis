@@ -1,0 +1,583 @@
+---
+title: "Midterm: Model Report"
+author: "Nichole Hanus"
+date: "Thursday, March 3, 2016"
+output: pdf_document
+fig_caption: true
+
+---
+
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Set the directory
+setwd("~/2. Courses/36-608 Advanced Data Analysis/Midterm")
+
+# Install required libraries and packages
+install.packages("formula.tools", repos = "http://cran.us.r-project.org")
+library(formula.tools) 
+
+require(fig.subcap)
+
+
+# for linear mixed effects in R
+install.packages("arm", repos = "http://lib.stat.cmu.edu/R/CRAN/")
+library(arm)
+
+# install KernSmooth for the np lines in the residual plots
+install.packages("KernSmooth", repos = "http://cran.us.r-project.org")
+library(KernSmooth) 
+
+# for pretty tables
+install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr) 
+
+# for variances and residual magic
+install.packages("sandwich", repos = "http://cran.us.r-project.org")
+library(sandwich)
+
+# for influence index plot
+install.packages("car", repos = "http://cran.us.r-project.org")
+library(car)
+
+# for GAM model
+install.packages("mgcv", repos = "http://cran.us.r-project.org")
+library(mgcv)
+
+# Read MSA data
+raj <- read.csv("~/2. Courses/36-608 Advanced Data Analysis/Midterm/RAJ.csv", header=TRUE)
+
+```
+
+
+# 1 Introduction
+
+In this report, we explore pre-industrial growth ("primitive accumulation") via a leading contemporary theory of this growth: A key indicator of early growth was trade across the Atlantic involving New World plantations, slaves, and imperial ventures in Africa and Asia. Moreover, this theory suggests that countries that started with relatively free institutions (i.e. minimally constrained executive branches in the initial years of the country's existance) were able to take advantage of the Atlantic trade system without much resistance and early merchants in this country encouraged even less restrictions within the country. Scholars of this theory have created a data set of relevent variables. We are charged with exploring this theory through this data set to determine (1) if the estimates of the suggested baseline linear model support the theory, (2) if the theory's model fits the data, (3) if another model might better predict the data set, and finally (4) if the potential alternative model provides evidence to support the suggested theory. 
+
+## Preliminary Examination of the Data
+
+The RAJ data set includes relevant variables to the "Atlantic Trade Theory" as well as other control variables, important to rival theories (e.g. urbanization fractions, population, coast-to-area ratios, initial constraint indices, etc.) Countries considered in this data set are constrained to those existing in Europe and Asia; this includes `r length(unique(raj[,"country"])) ` countries. Each data entry is for a particular year within a particular country and data spans the years `r min(raj$year) ` to `r max(raj$year) `; we have `r nrow(raj) ` in this data set. Upon examination, there seems to be data entries for years 1300, 1400, 1500, 1600, 1700, 1750, 1800, and 1850 for each country. Furthermore, there seems to be very little missing data (`r sum(is.na(raj)) ` missing data points out of a total `r nrow(raj)*ncol(raj) ` possible entries). 
+
+Variables of particular interest for this report include Urbanization, Coast-to-Area ratio, Initial Executive Branch constraints, index of Atlantic Trade, and Western European status. 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, cache=TRUE, out.width="0.48\\textwidth"}
+
+# create a data set for the specific variables of interest
+rajclean <- raj[,-4,drop = FALSE]
+rajclean <- rajclean[,-5,drop=FALSE]
+rajclean <- rajclean[,-(8:12),drop=FALSE]
+
+# plot variable histograms
+hist(rajclean$urbanization, main = "", col = "grey")
+rug(rajclean$urbanization)
+
+hist(rajclean$coastToArea, main = "", col = "grey")
+rug(rajclean$coastToArea)
+
+hist(rajclean$initialConstr, main = "", breaks = 7, xlim = c(1,7), col = "grey")
+rug(rajclean$initialConstr)
+
+hist(rajclean$atlTrade, main = "", breaks = 7, col = "grey")
+rug(rajclean$atlTrade)
+
+
+```
+
+From these histrograms we make a few initial comments. The level of urbaniazation (an estimate of the fraction of the population living in cities and towns) is skewed to the left, suggesting that very few countries within this data set had high urbanization levels at some point between 1300 and 1850. This may suggest a log transform, which we explore in the Proposed Model section. 
+
+We see very few countries having high coat-to-area ratios (max is `r max(raj$coastToArea) `) We also see a left skew in the level of initial executive branch constraint; it seems these countries had minimially constrained governments in their early years (i.e. 1 = least constrained, 7 = most constrained). Indices of Atlantic trade seemed to be nearly uniformly distributed for the majority of the data set and ranged from 0 to 8; approximately 20% of the data set reported a high atlantic trade index of around 7. Finally, we find 15 "western Europe" countries in this data set. 
+
+# 2 The Model
+## 2.1 Formulation
+
+The baseline linear model suggested by the scholars uses Urbanization ($u_{it}$) as a proxy for overall economic development of a country. This model includes Coast-to-Area ratio ($P_{i}$), Initial Executive Branch constraints ($C_{i}$), index of Atlantic Trade ($A_{t}$), and Western European status ($W_{i}$) and is ldefined as such:
+
+\begin{align}
+u_{it} = d_{t} + \delta_{i} + \alpha_{t}W_{i} + \beta A_{t} P_{i} + \gamma_{t}C_{i} + \eta A_{t} P_{i} C_{i} + \epsilon_{it}
+\end{align}
+
+We define a variable, "AtlTrade_Count", as the index of Atlantic trade in a year $A_{t}$ multiplied by Atlantic trade potential $P_{i}$). We see that this model considers an interaction between Atlantic Trade and the Initial Executive Branch constraints ($C_{i}$).
+
+The suggested baseline model is a multi-level model that considers fixed effects of Countries and Years and varying slopes, over years, for Western Europe and Initial Constraint. This model does not include an overall, pooled intercept. Next, let's observe the average levels of Urbanization for Years and Countires. 
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, out.width="0.48\\textwidth"}
+
+# remove NA's from raj clean to allow for plotting against residuals and other things from the regression object
+rajclean <- na.omit(rajclean)
+
+# plot fixed effects of years
+par(las=2)
+plot(as.factor(rajclean$year), rajclean$urbanization,
+     ylim = c(0, .4),
+     pch = 19,
+     col = rgb(0, 0, 0, .2),
+     ylab = "Urbanization",
+     xlab = "Year",
+     main = "Fixed Effects of Years")
+points(as.factor(rajclean$year),rajclean$urbanization, pch = 20, col = "blue")
+
+# plot fixed effects of countries - split into two plots of roughly 12 each
+par(las=2, cex = .9)
+plot(as.factor(rajclean$country), rajclean$urbanization,
+     cex = 0.1,
+     col = rgb(0, 0, 0, .2),
+     ylab = "Urbanization",
+     main = "Fixed Effects of Countries")
+points(as.factor(rajclean$country),rajclean$urbanization, pch = 20, col = "blue")
+
+```
+
+We see a gradual increase in Urbanization in the entire data set as time passes. We also see that outliers begin to form in later years, suggesting that initial economic growth in early years could result in increasing disparity among countries in later years. In the Fixed Effects of Countries boxplots, we examine economic progress of individual countries over time (i.e. each country has up to 8 data points - one for each documented year). We see that some countries such as Belgium and Norway seem to have consistently higher urbanization rates than other countries in this data set. 
+
+Next, we look at the relationship between Urbanization and a couple key regressors. We plot the "Atlantic Trade Potential" for each country against the Urbanization levels. We also consider the breakdown of Urbanization levels in the data set between Eastern European and Western European countries.
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, out.width="0.48\\textwidth"}
+
+# develop an "Atlantic Trade" variable for regression
+AtlTrade_Count <- rajclean$atlTrade*rajclean$coastToArea
+rajclean$AtlTrade_Count <- AtlTrade_Count
+
+# plot the "Atlantic Trade" variable versus urbanization
+plot(rajclean$AtlTrade_Count, rajclean$urbanization,
+     xlab = "Atlantic Trade Potential",
+     ylab = "Urbanization")
+rug(rajclean$AtlTrade_Count)
+
+# plot "westernEurope" versus urbanization
+plot(factor(rajclean$westernEurope), rajclean$urbanization,
+     xlab = "Western Europe=1",
+     ylab = "Urbanization")
+points(factor(rajclean$westernEurope), rajclean$urbanization, pch = 20, col = "blue")
+
+```
+
+We find that the majority of the data has a low Atlantic Trade Potential, as defined by the historians. There doesn't seem to be a distinct pattern here, suggesting that a high Atlantic Trade Potential alone does not suggest higher urbanization levels. Another important, although perhaps not intersting, point to note is the larger spread of Urbanizatin levels within the Western European countries, as depicted in the boxplot. This also suggests that geographic location does not dictate Urbanization levels (i.e. economic growth or "urbanization" is not only influenced by geographic location).
+
+This hierarchical model is troubling for such a small data set since each group has few observations (e.g. year only has 28 observations). Furthermore, varying slopes over years for "Western Europe" and "Initial Constraint" may not make sense as they values do not change at all over time for a specific country. 
+
+```{r, include = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# plots not included in the report, but useful to consider
+# plot initial constraints versus urbanization
+plot(factor(rajclean$initialConstr), rajclean$urbanization,
+     xlab = "Initial Constraints",
+     ylab = "Urbanization")
+points(factor(rajclean$initialConstr), rajclean$urbanization, pch = 20, col = "blue")
+
+```
+
+```{r, include = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# baseline model proposed by experts
+# "-1" removes the pooling intercept
+econ.base <- lm(urbanization ~ factor(year) + factor(country) + westernEurope:factor(year) + 
+                  AtlTrade_Count + initialConstr:factor(year) + AtlTrade_Count*initialConstr - 1, data = rajclean)
+
+summary(econ.base)
+# we see NA results for some of the coefficients; need to hand-make the coefficient table for report
+
+```
+
+After running this model, we have 188 coefficients. The summary results for this model suggest that the varying slopes for "Western Europe" and "Initial Constraint" are not significant. This may be due to the small number of observations in each of the groups. "Western Europe" and "Initial Constraint" do not change over time for a specific country, which is another reason to suggest pooling these slopes would be a better option. We also find that fixed effects for years and countries are significant. 
+
+Furthermore, we see NA results for the coefficients of initalConstr and westernEurope:1850. This could be due to there being too many observations to estimate a coefficient. 
+
+The following charts depict the fixed effect coefficients for year and country.
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE,  out.width="0.48\\textwidth"}
+
+# plot the fixed effects, years, coefficients and standard deviations
+yr.base.coefs <- c(summary(econ.base)$coefficients[(2:8),1])
+yr.base.coef.sd <- c(summary(econ.base)$coefficients[(2:8),2])
+yr.base.coef.names <- row.names(summary(econ.base)$coefficients)[2:8]
+par (cex = 0.8)
+coefplot(yr.base.coefs, yr.base.coef.sd, varnames=yr.base.coef.names,
+         var.las=1, main="Fixed Effects of Years - Coefficients")
+
+# plot the fixed effects, years, coefficients and standard deviations
+c.base.coefs <- c(summary(econ.base)$coefficients[(9:31),1])
+c.base.coef.sd <- c(summary(econ.base)$coefficients[(9:31),2])
+c.base.coef.names <- row.names(summary(econ.base)$coefficients)[9:31]
+coefplot(c.base.coefs, c.base.coef.sd, varnames=c.base.coef.names,
+         var.las=1, main="Fixed Effects of Countries - Coefficients")
+
+
+
+```
+
+These plots illustrate the magnitude of the coefficients as well as their standard errors. All coefficients for years are positive and the regression output is similar to what we found in the preliminary data analysis: urbanization tends to increase with time. 
+
+We also plot the coefficients of the main effects for the countries. Immediately, we see that Belgium and Netherlands seemed to have higher urbanization levels than other countries in the dataset during the years of interest. Ireland and England seemed to be trailing. Only four countries have positive average coefficient values: Spain, Netherlands, Italy, and Belgium. 
+
+Next, we consider how well our baseline regression fit the data by plotting the predicted values against the observed values. We include a standard error and level of noise ($\sigma$) for each prediction, depicted in grey. 
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center', fig.width=5, fig.height=4}
+
+# create a fitted versus predict plot like in lecture 10
+# first use the predlims function
+predlims <- function(preds, sigma) {
+  prediction.sd <- sqrt(preds$se.fit^2 + sigma^2)
+  upper <- preds$fit + 2 * prediction.sd
+  lower <- preds$fit - 2 * prediction.sd
+  lims <- cbind(lower = lower, upper = upper)
+  return(lims)
+}
+
+pred.econ <- predict(econ.base, se.fit = TRUE)
+predlims.econ <- predlims(pred.econ, sigma = summary(econ.base)$sigma)
+
+
+plot(rajclean$urbanization, econ.base$fit, type = "n", 
+     xlab = "Actual Urbanization Level",
+     ylab = "Predicted Urbanization Level", 
+     main = "Baseline Linear model", 
+     ylim = c(0, (max(predlims.econ))),
+     xlim = c(0, (max(predlims.econ))))
+segments(rajclean$urbanization, predlims.econ[, "lower"], rajclean$urbanization,
+         predlims.econ[, "upper"], col = "grey")
+abline(a = 0, b = 1, lty = "dashed")
+points(rajclean$urbanization, econ.base$fit, pch = 16, cex = 0.5)
+#plot legend
+legend('topleft', c("Baseline", "Standard Errors"), col = c("black", "grey"), lty=c(0,1), pch = c(16, 0))
+
+```
+
+Our model appears to perform consistent to the observed data. The standard errors and noise levels are constant at varying levels of Urbanization. We see that the majority of our data falls into lower categories of Urbanization and that we appear to have one outlier on the higher end of Urbanization (~0.5). For the most part, our data falls along the line (intercept = 0, slope =1), suggesting a nearly 1:1 ratio between predicted values and observed values.
+
+
+## 2.2 Model Assessment: Estimates and Uncertainty
+
+To understand the uncertainy contained in our estimates, we first consider 95% confidence intervals on the coefficients by way of resampling cases. The following depicts a subset of the coefficients (recall there were nearly 200) to illustrate an example of the spread. The majority of confidence intervals for the fixed effects of years does not include zero. However, the confidence intervals for the varying slopes (by year) for Western Europe and Initial Constraint do seem to contain zero.
+
+```{r, include = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# load the code from lecture 3
+source("http://www.stat.cmu.edu/~cshalizi/uADA/15/lectures/03-in-class.R")
+
+# load the code from lecture 7
+source("http://www.stat.cmu.edu/~cshalizi/uADA/16/lectures/07.R")
+
+```
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# calculate 95% confidence bands on coefficients with resampling of cases
+
+# define function for resampling data
+resample.econ <- function() { resample.data.frame(rajclean) }
+
+# define the statistic
+econ.base.lm <- function(data) {
+  fit <- lm(urbanization ~ factor(year) + factor(country) + westernEurope:factor(year) + 
+                  AtlTrade_Count + initialConstr:factor(year) + AtlTrade_Count*initialConstr - 1, data = data)
+  return(coefficients(fit))
+}
+
+# removes NAs so that quantile function can be applied
+equitails <- function(x, alpha) {
+  x <- na.omit(x)
+  lower <- quantile(x, alpha/2)
+  upper <- quantile(x, 1-alpha/2)
+  return(c(lower, upper))
+}
+
+# use bootstrap.ci function from lecture 6
+econ.base.ci <- bootstrap.ci(statistic = econ.base.lm,
+                             simulator = resample.econ,
+                             level=0.95,
+                             t.hat=coefficients(econ.base),
+                             B = 20)
+econ.base.ci <- na.omit(econ.base.ci)
+
+```
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center', fig.width=5, fig.height=4}
+
+# demonstrate a plot of a subset of the coefficients to show how some confidence intervals contained zero
+par(las = 2, pch = 16)
+plot(factor(row.names(econ.base.ci)[10:20]), econ.base.ci[(10:20), ], type = "n",
+     ylab = "95% CI of Urbanization")
+points(factor(row.names(econ.base.ci)[10:20]), econ.base.ci[(10:20),"upper"],
+       pch = 16, col = "blue")
+points(factor(row.names(econ.base.ci)[10:20]), econ.base.ci[(10:20),"lower"], 
+       pch = 16, col = "red")
+abline (h=0)
+
+```
+
+Next, we perform 5-fold cross-validation to calculate the mean squared error (MSE) of our model. 
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# this value is just to check to see if our CV-MSE is within the ballpark
+# signif(mean(econ.base$residuals^2), 3)
+
+# perform five-fold CV for the MSE
+
+# need to put formula in twice due to a "subsettable" error that seems to come and go as it pleases...
+base.formula <- c(as.formula("urbanization ~ factor(year) + factor(country) + westernEurope:factor(year) +
+                           AtlTrade_Count + initialConstr:factor(year) + AtlTrade_Count*initialConstr"),
+                  as.formula("urbanization ~ factor(year) + factor(country) + westernEurope:factor(year) +
+                           AtlTrade_Count + initialConstr:factor(year) + AtlTrade_Count*initialConstr"))
+
+```
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+cvMSE <- signif(cv.lm(data=rajclean, formulae=base.formula, nfolds=5), 3)
+
+```
+
+We find a rather small MSE of `r cvMSE[1]`. This small value is expected as we saw decent model performance in the previous predicted versus observed plot. 
+
+## 2.3 Model Checking
+
+We consider two methods for checking the validity of the historian's baseline linear model. We first consider how well it can predict the outcome via classification. Then we check for patternless residuals.
+
+### 2.3.1 Classification
+
+Our model predicts a continous variable. We compare the error-rates of our baseline model to that of a GAM model to determine the percentage of time our model out-performs the GAM. We use resampling of cases and perform 200 simulations to make our comparison.
+
+```{r, include = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# calculate a t-statistic for the baseline model and the GAM model to see if the linear model out-performs the GAM model
+resample <- function(x) {
+  sample(x, size = length(x), replace = TRUE)
+  }
+
+resample.data <- function() {
+  # Copy the data frame
+  new.frame <- rajclean
+  # Resample the row indices
+  sample.rows <- resample(1:nrow(new.frame))
+  # Return a new data frame with those rows in that order
+  return(new.frame[sample.rows,])
+}
+
+# calculate original difference in MSE
+mse <- function(model) { mean(residuals(model)^2) }
+
+econ.gam <- gam(urbanization ~ s(year,k=7) + factor(country) + westernEurope + 
+                  s(atlTrade, coastToArea) + s(initialConstr,k=4) + s(atlTrade, coastToArea, by=initialConstr), data = rajclean)
+
+t.obs <- mse(econ.base) - mse(econ.gam)
+
+calc.T <- function(df) {
+  MSE.base <- mse(lm(urbanization ~ factor(year) + factor(country) + westernEurope:factor(year) + 
+                  AtlTrade_Count + initialConstr:factor(year) + AtlTrade_Count*initialConstr, data = df))
+  MSE.np <-   mse(gam(urbanization ~ s(year,k=7) + factor(country) + westernEurope:factor(year) + 
+                  s(atlTrade, coastToArea) + initialConstr:factor(year) + s(atlTrade, coastToArea, by=initialConstr), data = df))
+  return(MSE.base - MSE.np)
+}
+
+T.null.samples <- replicate(200, calc.T(resample.data()))
+
+```
+
+```{r, include = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+#The probability, under the null, of getting a test statistic which
+#exceeds what we saw on the data is thus about
+prob <- (1+sum(T.null.samples > t.obs))/(1+length(T.null.samples))
+prob
+
+```
+
+We find a probability equal to `r signif(prob, digits = 3)` of finding such a big gap between two baseline linear model and a generalized additive model with smoothing. Therefore, we conclude that the baseline model is decently specified. We do not have evidence to suggest that the baseline model is making systematic errors.
+
+### 2.3.2 Residuals
+
+We are looking for patternless residuals across all regressors as well as the observed values. First we consider the fitted versus observed by plotting the scatter plot as well as a Q-Q plot of residuals.
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, out.width="0.48\\textwidth"}
+
+# Next, plot the residuals
+
+# first plot fitted versus residuals
+plot(fitted(econ.base), econ.base$residuals,
+     xlab = "Fitted Baseline Values",
+     ylab = "Residuals")
+rug(fitted(econ.base))
+abline(h=0, col="red")
+
+# consider the q-q plot
+qqnorm(econ.base$residuals)
+qqline(econ.base$residuals, col = "red")
+
+```
+
+In the fitted versus residuals scatterplot, we see relatively homogeneous spread of the residuals across fitted values. The Q-Q plot suggets slightly heavy tails. However, the majority of the plot follows the line and the tails are symmetric.
+
+Next we see relatively patternless residuals across three of the key regressors.
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, out.width="0.33\\textwidth"}
+
+# check residual plots for each of the predictor variables
+
+# westernEurope
+plot(factor(rajclean$westernEurope), econ.base$residuals, ylab = "Residuals",
+     xlab = "Western Europe")
+abline(h = 0, col = "red")
+
+# initial constraint
+plot(factor(rajclean$initialConstr), econ.base$residuals, 
+     ylab = "Residuals",
+     xlab = "Initial COnstraint")
+abline(h = 0, col = "red")
+
+# AtlTrade_count
+plot(rajclean$AtlTrade_Count, econ.base$residuals, 
+     ylab = "Residuals",
+     xlab = "AtlTrade_Count")
+abline(h = 0, col = "red")
+
+
+```
+
+We develop diagnostics plots to identify any outliers and determine their leverage in the regression. 
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# check for influential observations
+influenceIndexPlot(econ.base, id.n = 5)
+
+```
+
+We see that point 18 is the most influential observation, which has a large Cook's Distance (i.e. large discrepency and high leverage). This issue may be addressed after changing the model to a more robust regression method, which will be presented in the following section. Next we will compare the convergence of this suggested model to that of a generalized additive model with smoothers on all continuous variables to see if the suggested might be misspecified. 
+
+# 3. Proposed Model
+
+From the baseline regression, we determine it does not make much sense to vary the slope by year. Therefore, we check the model by dropping the varying slopes and determining if there should be any transformations on "year", "Coast Ratio", or "atlTrade." We also recall from a previous histogram of the dependent variable, Urbanization, that our model might benefit from a log transform of this variable. Finally, a generalized additive model might also take care of the observed potential outlier with high leverage (e.g. high Cook's D).
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# perform GAM model to see if any transformations are suggested
+econ.2 <- gam(urbanization ~ s(year,k=7) + factor(country) + westernEurope + 
+                s(AtlTrade_Count) + s(coastToArea) + s(initialConstr,k=4) + 
+                s(atlTrade, coastToArea, by=initialConstr), data = rajclean)
+plot(econ.2,  scale = 0, se = 2, shade = TRUE, resid = TRUE, pages = 1)
+
+```
+```{r, include = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# previous GAM suggests perhaps a cubic polynomial on the AtlTrade_Count variable
+rajclean$AtlTrade_cube <- rajclean$AtlTrade_Count^3
+
+econ.3 <- gam(urbanization ~ s(year,k=7) + factor(country) + westernEurope + 
+                s(AtlTrade_cube) + s(coastToArea) + s(initialConstr,k=4) + 
+                s(atlTrade, coastToArea, by=initialConstr), data = rajclean)
+plot(econ.3,  scale = 0, se = 2, shade = TRUE, resid = TRUE, pages = 1)
+
+# end up with a linear model with homogenous slopes on Western Europe and Initial Constraint. 
+# Change the AtlTrade_count to cubic term.
+# drop the interaction
+rajclean$logurb <- log(1+rajclean$urbanization)
+
+econ.fit <- lm(logurb ~ factor(year) + factor(country) + westernEurope + 
+                  AtlTrade_cube + initialConstr, data = rajclean)
+
+summary(econ.fit)
+
+# perform cross-validation for MSE of the new linear model
+signif(mean(econ.fit$residuals^2), 3)
+
+# perform five-fold CV for the MSE, comparing the baseline model to the new model
+compare.formula <- c(as.formula("urbanization ~ factor(year) + factor(country) + westernEurope:factor(year) +
+                           AtlTrade_Count + initialConstr:factor(year) + AtlTrade_Count*initialConstr"),
+                  as.formula("logurb ~ factor(year) + factor(country) + westernEurope +
+                           I(AtlTrade_Count^3) + initialConstr"))
+```
+
+From the GAM plots we see a linear relationship between urbanization and year, Coast to Area, and Initial Constraint. The partial plot of atlTrade suggests a log transform might be appropriate. It also appears that our AtlTrade_Count variable might benefit from a cubic polynomial transformation. We decide to use the following model after performing the preliminary data analysis, coefficient analysis from the baseline regression, and running a GAM model:
+
+\begin{align}
+\log{u_{it}} = d_{t} + \delta_{i} + \alpha W_{i} + \beta A_{t} P_{i}^{3} + \gamma C_{i} + + \epsilon_{it}
+\end{align}
+
+Next, we perform five-fold cross-validation to compare the baseline model with the updated model.
+
+```{r, include = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+compare <- signif(cv.lm(data=rajclean, formulae=compare.formula, nfolds=5), 3)
+compare
+
+```
+
+The updated model produces a lower MSE than the baseline linear model (baseline model MSE = `r compare[1]` and updated model MSE = `r compare[2]`), suggesting the modications provide a better fit to the data. 
+
+
+```{r, include = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# too long to include in report, but important to perform
+
+# Next, plot the residuals
+# first plot fitted versus residuals
+plot(fitted(econ.fit), econ.fit$residuals,
+     xlab = "Fitted Baseline Values",
+     ylab = "Residuals")
+rug(fitted(econ.fit))
+abline(h=0, col="red")
+
+# consider the q-q plot
+qqnorm(econ.fit$residuals)
+qqline(econ.fit$residuals, col = "red")
+
+# check residual plots for each of the predictor variables
+
+# westernEurope
+plot(factor(rajclean$westernEurope), econ.fit$residuals, ylab = "Residuals",
+     xlab = "Western Europe")
+abline(h = 0, col = "red")
+
+# initial constraint
+plot(factor(rajclean$initialConstr), econ.fit$residuals, 
+     ylab = "Residuals",
+     xlab = "Initial COnstraint")
+abline(h = 0, col = "red")
+
+# AtlTrade_count
+plot(rajclean$AtlTrade_Count, econ.fit$residuals, 
+     ylab = "Residuals",
+     xlab = "AtlTrade_Count")
+abline(h = 0, col = "red")
+
+# check for influential observations
+influenceIndexPlot(econ.base, id.n = 5)
+
+```
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# create a fitted versus predict plot like in lecture 10 and compare to econ.base
+# first use the predlims funciton
+
+pred.fit <- predict(econ.fit, se.fit = TRUE)
+predlims.fit <- predlims(pred.econ, sigma = summary(econ.fit)$sigma)
+
+plot(rajclean$urbanization, econ.base$fit, type = "n", 
+     xlab = "Actual Urbanization Level",
+     ylab = "Predicted Urbanization Level", 
+     main = "Baseline versus Updated Linear model", 
+     ylim = c(0, exp(max(predlims.econ))))
+segments(rajclean$urbanization, predlims.fit[, "lower"], rajclean$urbanization,
+         predlims.fit[, "upper"], col = "grey")
+abline(a = 0, b = 1, lty = "dashed")
+points(rajclean$urbanization, econ.fit$fit, pch = 16, cex = 0.3)
+# compare to the previous econ.base fitted line
+urb <- as.vector(rajclean$urbanization)
+fit <- as.vector(fitted(econ.base))
+base.plot <- data.frame(urb,fit)
+base.plot <- base.plot[order(urb),]
+points(base.plot$urb, base.plot$fit, col = "red", pch=16, cex = 0.3)
+#plot legend
+legend('topleft', c("Baseline", "New", "SE on New"), col = c("red","black","grey"), lty=c(0,0,1), pch = c(16, 16, 0))
+
+```
+
+# Conclusion
+
+In this report we illustrate the strengths and weaknesses of the proposed model (Equation 1). As specified, the baseline model performs well. It can predict well out of sample in terms of classification and the fitted versus observed value plots demonstrates good calibation. Furthermore, the residuals appeared homogeneous across regressors and fitted values. However, the interaction term and the varying slopes resulted in nearly 200 coefficients (almost equal to the length of the dataset), many of which were not significant. The suggested model drops the interaction, removes the varying slopes. Transformations in this model include a log-transform of the urbanization rates  and transforming the AtlTrade_Count into a cubic polynomial. This updated model (Equation 2) out-performs the orginal baseline model in terms of cross-valideated MSE. To account for a small data set and small numbers of observations within groups (years and countries), it is suggested that they drop the varying slopes as well as the interaction. This updated model will perform better and have less non-significant coefficients. 
+
+
+
+
+

@@ -1,0 +1,595 @@
+---
+title: "Homework 5"
+author: "Nichole Hanus"
+date: "Monday, February 15, 2016"
+output: pdf_document
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Set the directory
+setwd("~/2. Courses/36-608 Advanced Data Analysis/HW 5")
+
+# Install required libraries and packages
+install.packages("formula.tools", repos = "http://cran.us.r-project.org")
+library(formula.tools) 
+
+# for pretty tables
+install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr) 
+
+# Read MSA data
+gmp <- read.csv("~/2. Courses/36-608 Advanced Data Analysis/HW 5/gmp-2006.csv", header=TRUE)
+
+```
+
+## 1. Find equations $\beta_{0}$ and $\beta_{1}$ in terms of $c$ and $b$. 
+
+If Eq.1 holds, then $\log y \approx \beta_{0} + \beta_{1}\log N$. Where, Eq.1 is: 
+
+\begin{align}
+Y &\approx cN^{b}
+\end{align}
+
+First we divide both sides of Eq.1 by N:
+
+\begin{align}
+\frac{Y}{N} &\approx \frac {cN^{b}} {N} \nonumber \\
+&\approx cN^{b-1} \nonumber
+\end{align}
+
+Then we take the log of both sides:
+
+\begin{align}
+\log \left( \frac{Y}{N} \right) &\approx \log(c) (b-1)\log(N) \nonumber \\
+\end{align}
+
+Where $\beta_{0} = \log (c)$ and $\beta_{1} = b-1$.
+
+## 2. Estimating the power-law scaling model.
+
+### 2.a. How is this statistical model similar to Eq. 1?
+
+This statistical model is essentially a log transform of Eq. 1 to allow for a linear regression of per capita product on the covariate, population.
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2.Use lm to linearly regress log per capita product on log population
+logGMP.lm <- lm(log(pcgmp) ~ log(pop), data = gmp, na.action = na.exclude)
+
+# 2.b. What are the estimated coefficients? 
+kable(coefficients(summary(logGMP.lm)), digits = 2)
+
+
+```
+
+The estimated coefficients suggest that a 1% increase in population results in a .12% increase in GMP. Furthermore, 
+
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2.b. Provide 95% Ci confidence intervals through resample of cases (here, resampling cities).
+
+# first, develop a lm regression function
+# Inputs: data frame or array (data)
+# Outputs: coefficient of predictor variable
+# Presumes: 2nd column of data is response variable
+  # 3rd column of data is predictor variable
+coef.BO.estimator <- function(data) {
+  fit <- lm(log(data[,2])~log(data[,3]))
+  coef.BO <- coefficients(summary(fit))[1,1]
+  return(coef.BO)
+}
+
+coef.B1.estimator <- function(data) {
+  fit <- lm(log(data[,2])~log(data[,3]))
+  coef.B1 <- coefficients(summary(fit))[2,1]
+  return(coef.B1)
+}
+
+# borrow resampling functions from textbook (and HW4 solution):
+resample <- function(x) {
+sample(x, size = length(x), replace = TRUE)
+}
+
+resample.data.frame <- function(data) {
+  sample.rows <- resample(1:nrow(data))
+  return(data[sample.rows, ])
+}
+
+# find coefs
+coef.B0.lm <- coefficients(summary(logGMP.lm))[1,1]
+coef.B1.lm <- coefficients(summary(logGMP.lm))[2,1]
+
+
+# now calculate several simulations of regression curves
+# borrow code from HW4 solution
+Coef.B0.cis <- function(B, alpha, existing.coef = coef.B0.lm){
+  coef.boots <- replicate(B, coef.BO.estimator(resample.data.frame(gmp)))
+  cis.lower <- 2*existing.coef - quantile(coef.boots, probs = 1-alpha/2)
+  cis.upper <- 2*existing.coef - quantile(coef.boots, probs = alpha/2)
+  return(list(lower.ci=cis.lower,upper.ci=cis.upper))
+  }
+
+Coef.B1.cis <- function(B, alpha, existing.coef = coef.B1.lm){
+  coef.boots <- replicate(B, coef.B1.estimator(resample.data.frame(gmp)))
+  cis.lower <- 2*existing.coef - quantile(coef.boots, probs = 1-alpha/2)
+  cis.upper <- 2*existing.coef - quantile(coef.boots, probs = alpha/2)
+  return(list(lower.ci=cis.lower,upper.ci=cis.upper))
+  }
+
+# estimate B0 coef 95% CI
+B0.CI <- Coef.B0.cis(B=20, alpha = 0.05)
+
+# estimate B1 coef 95% CI
+B1.CI <- Coef.B1.cis(B=20, alpha = 0.05)
+
+# combine values for table
+table.CI <- array(c(B0.CI[1], B1.CI[1], B0.CI[2],B1.CI[2]), dim=c(2,2))
+colnames(table.CI) <- c("Low CI", "Hi CI")
+rownames(table.CI) <- c("B0","B1")
+
+kable(table.CI)
+
+```
+
+
+### 2.c. Supra-linear scaling?
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+# 2.c. writin response
+b <- coef.B1.lm  + 1
+c <- exp(coef.B0.lm)
+
+# develop vector of supra-linear scaling
+Y <- c*gmp[,3]^b
+
+# compare to yN
+yN <- gmp[,3]*gmp[,2]
+
+# create dataframe for plotting
+supra.data <- data.frame(gmp$pop, Y, yN)
+supra.data <- supra.data[order(gmp$pop),]
+
+plot(1, type = "n", xlim = c(0, 20000000), ylim = c(0, 1*10^12), 
+     xlab="Population", ylab="Gross Metropolitan Product",
+     main = "Supra-linear vs. yN")
+
+# add Y line
+lines(x = supra.data$gmp.pop, y = supra.data$Y, col = "red")
+
+# add yN line
+lines(x = supra.data$gmp.pop, y = supra.data$yN, col = "blue")
+
+# plot legend
+legend('topleft', c("supra", "yN"), col = c("red","blue"), lty=c(1,1,1))
+
+```
+
+Yes, it appears our estimates are compatible with the idea of supra-linear scaling. The majority of our data is on the lower-end of population sizes and we see similar behavior in the red "supra" line to the actual observed behavior yN (blue line).
+
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2.d Use CV to find MSE
+
+# Use code from Lecture 3
+# re-write the regression formula
+logGMP.lm_formula <- "I(log(pcgmp)) ~ I(log(pop))"
+logGMP.lm_formula <- as.formula(logGMP.lm_formula)
+
+formulae <- c(logGMP.lm_formula,logGMP.lm_formula) # kept getting "not subsettable" problem
+
+# Use response.name function from lecture notes
+response.name <- function(formula) {
+  var.names <- all.vars(formula)
+  return(var.names[1])
+}
+
+## ----kfold-cv-for-linear-models------------------------------------------
+# General function to do k-fold CV for a bunch of linear models
+  # Inputs: dataframe to fit all models on,
+    # list or vector of model formulae,
+    # number of folds of cross-validation
+  # Output: vector of cross-validated MSEs for the models
+cv.lm <- function(data, formulae, nfolds) {
+  # Make sure the formulae have type "formula"
+  formulae <- sapply(formulae, as.formula)
+  # Extract the name of the response variable from each formula
+    # ATTN: CV doesn't make a lot of sense unless these are all the same!
+  responses <- sapply(formulae, response.name)
+  names(responses) <- as.character(formulae)
+  n <- nrow(data)
+  # Assign each data point to a fold, at random
+    # see ?sample for the effect of sample(x) on a vector x
+  fold.labels <- sample(rep(1:nfolds, length.out=n))
+  mses <- matrix(NA, nrow=nfolds, ncol=length(formulae))
+  colnames <- as.character(formulae)
+  # EXERCISE: Replace the double for() loop below by defining a new
+  # function and then calling outer()
+  for (fold in 1:nfolds) {
+    test.rows <- which(fold.labels == fold)
+    train <- data[-test.rows,]
+    test <- data[test.rows,]
+    for (form in 1:length(formulae)) {
+       # Fit the model on the training data
+       current.model <- lm(formula=formulae[[form]], data=train)
+       # Generate predictions on the testing data
+       predictions <- predict(current.model, newdata=test)
+       # Get the responses on the testing data
+       test.responses <- test[,responses[form]]
+       # Calculate errors
+       test.errors <- log(test.responses) - predictions
+       # Calculate the MSE on that fold
+       mses[fold, form] <- mean(test.errors^2)
+    }
+  }
+  return(colMeans(mses))
+}
+
+cv.lm(data = gmp, formulae = formulae, nfolds = 5)
+
+
+```
+
+The MSE for the parametric power model is decent as the maximum log(pcgmp) value is ~11.
+
+## 3. NP Smoothers on log y and log N
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 3. Fit an NP smoother to log y and Log N
+# Borrow code from lecture for spline fitting
+gmp.spline <- smooth.spline(x=log(gmp$pop),y=log(gmp$pcgmp),cv=TRUE)
+gmp.spline
+gmp.spline$lambda
+
+## ----kfold-cv-for-spline-models------------------------------------------
+# General function to do k-fold CV for a spline model
+  # Inputs: dataframe to fit all models on,
+    # list or vector of model formulae,
+    # number of folds of cross-validation
+  # Output: vector of cross-validated MSEs for the models
+cv.spline <- function(data, nfolds) {
+  n <- nrow(data)
+  # Assign each data point to a fold, at random
+    # see ?sample for the effect of sample(x) on a vector x
+  fold.labels <- sample(rep(1:nfolds, length.out=n))
+  mses <- matrix(NA, nrow=nfolds, ncol=1)
+
+  for (fold in 1:nfolds) {
+    test.rows <- which(fold.labels == fold)
+    train <- data[-test.rows,]
+    test <- data[test.rows,]
+    test.order <- test[order(test$pop),] #spline.smooth predict returns ordered x values
+
+       # Fit the model on the training data
+       current.model <- smooth.spline(x=log(train$pop), 
+                                      y = log(train$pcgmp), cv = TRUE)
+       # Generate predictions on the testing data
+       predictions <- predict(current.model, newdata=test)$y
+       # Get the responses on the testing data
+       test.responses <- test.order[,2]
+       # Calculate errors
+       test.errors <- log(test.responses) - predictions
+       # Calculate the MSE on that fold
+       mses[fold, ] <- mean(test.errors^2)
+    
+  }
+  return(colMeans(mses))
+}
+
+cv.spline1 <- cv.spline(gmp, nfolds=5)
+cv.spline1
+
+
+```
+
+The cross-validated MSE for the non-parametric smoothing function is 0.08, which is still decent for the log(GMP) range and is similar to the parametric function MSE.
+
+\break
+## 4. "Visualization can be almost as misleading as a living teacher"
+
+### 4.a. Plot Splines and Linear Regression
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4.a. Plot y against N, adding to the plot both the estimated power lowss from problem and and curve from problem 3
+plot(gmp$pop, gmp$pcgmp,
+     xlab = "x = MSA Population",
+     ylab = "y = Per-capita GMP ($/person/yr)",
+     main = "y vs N"
+  )
+
+# add Problem 2 linear model curve
+yexp <- exp(fitted(logGMP.lm))
+linear.data <- data.frame(gmp$pop, yexp)
+linear.data <- linear.data[order(linear.data$gmp.pop),]
+lines(x = linear.data$gmp.pop, y = linear.data$yexp, col = "red")
+
+# add Problem 3 splines model curve
+gmp.spline.x <- exp(gmp.spline$x)
+gmp.spline.y <- exp(gmp.spline$y)
+lines(x = gmp.spline.x, y = gmp.spline.y, col = "green")
+
+
+# plot legend
+legend('topright', c("lm.y", "spline.y"), col = c("red","green"), lty=c(1,1,1))
+
+```
+
+As suggested in the similar MSE values for the parametric and non-parametric functions, this plot depicts these functions performing relatively similarly. At very small populations (thousands), the spline and linear regression almost behave as inverses of each other. Still, their fitted per-capita GMP values are within less than 10,000 of each other. The spline function also tries to fit higher values for populations between 1-2 million due to point higher density in this area. The linear model seems to perform better in that region.
+
+
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4.b. plot Y versus N
+Y <- gmp$pcgmp*gmp$pop
+
+plot(gmp$pop, Y,
+     xlab = "x = MSA Population",
+     ylab = "Y = Gross Metropolitan Product",
+     main = "Parametric vs. Non-Parametric"
+  )
+
+# add Problem 2 linear model curve, Y
+logGMP.lm.Y <- fitted(logGMP.lm)
+logGMP.lm.Y <- exp(logGMP.lm.Y)*gmp$pop
+plot <- data.frame(logGMP.lm.Y, gmp$pop)
+plot.order <- plot[order(plot$gmp.pop),]
+lines(x = plot.order$gmp.pop, y = plot.order$logGMP.lm.Y, col = "red")
+
+# add problem 3 splines model curve, Y
+# add Problem 3 splines model curve
+gmp.spline.Y <- exp(gmp.spline$y)*gmp.spline.x 
+lines(x = gmp.spline.x, y = gmp.spline.Y, col = "green")
+
+# plot legend
+legend('topleft', c("lm.Y", "spline.Y"), col = c("red","green"), lty=c(1,1,1))
+
+
+```
+
+After considering gross domestic product (i.e. multiplying the per-capita GMP with the population), we see the nonparametric model (spline) and parametric model behaving almost identically.  
+
+
+## 5. find difference in sample MSE between problem 2 and 3
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Find difference in MSE in sample between the power law model (problem 2)
+# and the model from problem 3
+# repeatedly simulate power law by resampling residuals
+# re-estimate both models on simulation
+
+
+# borrow code from HW 4 for resaampling residuals
+gmp.data <- data.frame(gmp$pcgmp, gmp$pop)
+
+# Resample residuals from original logGMP.lm result
+# Inputs: none
+# Output: only x-values (population)
+# Presumes: gmp.data exists (and is a data frame)
+resample.residuals <- function() {
+  new.frame <- gmp.data
+  names(new.frame)[2] <- "x"
+  new.new_gmp <- fitted(logGMP.lm) + sample(residuals(logGMP.lm))
+  new.frame$y <- new.new_gmp
+  return(new.frame)
+}
+
+# function for calculating residuals - taken from class
+mse.residuals <- function(model) { mean(residuals(model)^2) }
+
+# calculate difference in MSEs
+t.hat <- mse.residuals(logGMP.lm) - mse.residuals(gmp.spline)
+
+
+# Calculate difference in MSEs between parametric and nonparametric models on a data frame:
+calc.T <- function(df) {
+  MSE.p <- mse.residuals(lm(y~log(x),data=df))
+  MSE.np <- mse.residuals(smooth.spline(x = log(df$x), y = df$y, cv = TRUE))
+  return(MSE.p - MSE.np)
+}
+
+# Calculate the MSE difference on 200 simulation runs, so we get a sample from the null hypothesis:
+
+null.samples.T <- replicate(1000,calc.T(resample.residuals()))
+
+#How often does the simulation produce gaps bigger than what we really saw?
+sum(null.samples.T > t.hat)
+p.value <- sum(null.samples.T > t.hat)/1000
+p.value
+
+```
+
+At the 5% significance level, we do not reject the null hypothesis.
+
+Null hypothesis: Parametric model performs as well as the non-parametric model.
+
+Therefore, we conclude that the parametric model does not perform better than the non-parametric model. 
+
+
+## 6. Smooth Additive Model
+
+### 6.a. log y is smooth additive function of the four industry shares
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 6.a. Estimate a model where log y is a smooth additive function of the four industry shares
+
+# borrow code from class
+# Load the mgcv package, but do so in a code block which throws away all
+# the output, so we don't bother with its start-up message
+require(mgcv)
+
+logGMP.gam <- gam(log(pcgmp)
+  ~ s(finance) + s(prof.tech) + s(ict)
+  + s(management), data=gmp)
+
+# display partial response functions
+# code from class
+plot(logGMP.gam,scale=0,se=2,shade=TRUE,pages=1, ylab = "per-capita GMP")
+
+```
+
+We find that per-capita GMP is linearly related with most types of industry shares. However, per-capita GMP may be linearly related with square of Information and Communication Technology (ICT) shares, since we see something that looks like a quadratic function in the ICT plot. 
+
+### 6.b. Smooth function + Linear log N
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 6.b. estimate a model like problem 6a, but add a term which is linear in log N
+logGMP.gam.b <- gam(log(pcgmp)
+  ~ s(finance) + s(prof.tech) + s(ict)
+  + s(management) + log(pop), data=gmp)
+
+# display coefficient from logN
+gam.summary <- summary(logGMP.gam.b)
+gam.summary$p.table[2,]
+
+# display updated partial response functions
+plot(logGMP.gam.b,scale=0,se=2,shade=TRUE,pages=1, main = "+linear logN")
+
+```
+
+The coefficient on log N is -0.0026; however, this does not appear to be a significant coefficient in the smoothing function.
+
+The partial response functions do not appear to change, as depicted in the plots.
+
+\break
+### 6.c. CV to find MSE of models 6.a. and 6.b
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+## ----kfold-cv-for-linear-models------------------------------------------
+# General function to do k-fold CV for 6.a. and 6.b smooth additive models
+  # Inputs: dataframe to fit all models on,
+    # list or vector of model formulae,
+    # number of folds of cross-validation
+  # Output: vector of cross-validated MSEs for the models
+cv.gam <- function(data, nfolds) {
+  data <- na.omit(data)
+  n <- nrow(data)
+  
+  # Assign each data point to a fold, at random
+  fold.labels <- sample(rep(1:nfolds, length.out=n))
+  mses <- matrix(NA, nrow=nfolds, ncol=2)
+  
+  for (fold in 1:nfolds) {
+    test.rows <- which(fold.labels == fold)
+    train <- data[-test.rows,]
+    test <- data[test.rows,]
+    
+    ### for model 6.a ###
+    current.model.a <- gam(log(pcgmp) ~ s(finance) + 
+                                s(prof.tech) + s(ict)
+                              + s(management), data=train)
+    # Generate predictions on the testing data
+    predictions.a <- predict(current.model.a, newdata=test)
+    # Get the responses on the testing data
+    test.responses.a <- log(test[,2])
+    # Calculate errors
+    test.errors.a <- log(test.responses.a) - predictions.a
+    
+    ### for model 6.b ###
+    current.model.b <- gam(log(pcgmp) ~ s(finance) + s(prof.tech) + 
+                             s(ict) + s(management) + log(pop), data=train)
+    # Generate predictions on the testing data
+    predictions.b <- predict(current.model.b, newdata=test)
+    # Get the responses on the testing data
+    test.responses.b <- test[,2]
+    # Calculate errors
+    test.errors.b <- log(test.responses.b) - predictions.b
+    
+    # Calculate the MSE on that fold
+    mses[fold, 1] <- mean(test.errors.a^2)
+    mses[fold, 2] <- mean(test.errors.b^2)
+    }
+  return(colMeans(mses, na.rm = TRUE))
+}
+
+
+cv.gam(data = gmp, nfolds = 5)
+
+```
+
+The MSE for the GAM model including the population is far better than the MSE for the GAM model not including the population; we see MSEs of 0.05 and 64, respectively.
+
+## 7. Find the difference in in-sample MSEs between problem 3 and 6a
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# resample residuals from problem 3
+resample.residuals.7 <- function() {
+  new.frame <- gmp
+  new.new_gmp <- fitted(gmp.spline) + sample(residuals(gmp.spline))
+  new.frame$y <- new.new_gmp
+  return(new.frame)
+}
+
+
+ new.frame <- gmp
+  new.new_gmp <- fitted(gmp.spline) + sample(residuals(gmp.spline))
+  new.frame$y <- new.new_gmp
+
+# calculate difference in MSEs
+t.hat.7 <- mse.residuals(gmp.spline) - mse.residuals(logGMP.gam)
+
+# Calculate difference in MSEs between problem 3 and 6a on a data frame:
+calc.T.7 <- function(df) {
+  MSE.np <- mse.residuals(smooth.spline(x=log(df$pop),y=log(df$y),cv=TRUE))
+  MSE.gam <- mse.residuals(gam(log(y) ~  s(finance) +
+                                 s(prof.tech) + s(ict) + s(management) , data = df)) 
+  return(MSE.np - MSE.gam)
+}
+
+
+# Calculate the MSE difference on 1000 simulation runs, so we get a sample from the null hypothesis:
+
+null.samples.T7 <- replicate(1000,calc.T.7(resample.residuals.7()))
+
+
+#How often does the simulation produce gaps bigger than what we really saw?
+sum(null.samples.T > t.hat)
+p.value.2 <- sum(null.samples.T7 > t.hat.7)/1000
+p.value.2
+
+```
+
+We find a p.value of <0.0005, suggesting we reject the null hypothesis at a 0.05 significence level. 
+
+H0: The non-parametric population-model performs as well as the model from 6a.
+
+Therefore, we conclude that the non-parametric population-model performs better than the model from 6a (generlized additive model of industry shares, without population). We conclude that the population is a better predictor of economic differences than industry shares. 
+
+## Extra Credit
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, out.width="0.48\\textwidth"}
+
+# extra credit
+finance.gam <- gam(finance ~ s(pop), data=gmp)
+proftech.gam <- gam(prof.tech ~ s(pop), data=gmp)
+ict.gam <- gam(ict ~ s(pop), data=gmp)
+management.gam <- gam(management ~ s(pop), data=gmp)
+
+# plot gams
+plot(finance.gam,scale=0,se=2,shade=TRUE,pages=1, ylab = "Finance Share",
+     xlab = "Population", main = "Finance")
+
+plot(proftech.gam,scale=0,se=2,shade=TRUE,pages=1, ylab = "Prof. Tech Share",
+     xlab = "Population", main = "Prof. Tech.")
+
+plot(ict.gam,scale=0,se=2,shade=TRUE,pages=1, ylab = "ict Share", 
+     xlab = "Population", main = "ICT")
+
+plot(management.gam,scale=0,se=2,shade=TRUE,pages=1, xlab = "Population",
+     ylab = "Management", main = "Management")
+
+```
+
+From the plots, we find that Finance and Prof. Tech. might be functions of Population. For instance, dense urban centers (i.e. high population in an MSA) are more likely to have a downtown business district where the majority of their gross metropolitan product would be developed. It also makes sense that we see a steep increase in Finance share of GMP with smaller populations, as smaller town or less-populated rural areas might have a few banks in their "downtown districts" and might not have much else industry contributing to their GMP. The relationship between Prof. Tech. and Population is less clear, but the local minimum between 5 million and 10 million may account for Chicago, which is not known for being a "tech-city". For Information and Communication technology (ICT) and Management, we see shares increasing rapidly and rather linearly between population sizes of 0 and ~2 million, suggesting as cities grow they need more information and communication technology and management infrastructure to support their businesses. This tends to plateau at certain population sizes, suggesting a saturation effect at higher density levels. Not accounting for industry shares being a function of population should explain why the model from problem 6.a. was significantly different from that of the model in problem 3 (and 6.b and 2).
+
+
+

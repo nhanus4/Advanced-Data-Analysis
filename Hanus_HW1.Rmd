@@ -1,0 +1,634 @@
+---
+title: "Homework 1"
+author: "Nichole Hanus"
+date: "Monday, January 20, 2016"
+output: pdf_document
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Set the directory
+setwd("~/2. Courses/36-608 Advanced Data Analysis/HW 1")
+
+# Install required libraries and packages
+
+# for pretty tables
+install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr) 
+
+# for pretty maps
+install.packages("fields", repos = "http://cran.us.r-project.org")
+install.packages("maptools", repos = "http://cran.us.r-project.org")
+install.packages("rgeos", repos = "http://cran.us.r-project.org")
+install.packages("rworldmap", repos = "http://cran.us.r-project.org")
+library(rworldmap)
+
+# for pretty QQ plots
+install.packages("AER", repos = "http://cran.us.r-project.org")
+library(AER)
+
+# for kernal smoothing curves
+install.packages("KernSmooth", repos = "http://cran.us.r-project.org")
+library(KernSmooth)
+
+# Read in data
+CAPA <- read.csv("~/2. Courses/36-608 Advanced Data Analysis/HW 1/CAPA.csv", header=TRUE)
+
+# Remove the lines containing NA
+cleanCAPA <- na.omit(CAPA)
+
+```
+
+##1. Cleaning CAPA data
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+# number of cases in CAPA data
+nCAPA <- nrow(CAPA)
+
+# number of cases in cleanCAPA data
+ncleanCAPA <- nrow(cleanCAPA)
+
+# number of cases removed
+removed <- nCAPA - ncleanCAPA
+
+print("Cases Removed")
+print(removed)
+
+# Determine the number of people living in the removed cases
+removed.pop <- sum(CAPA$POPULATION) - sum(cleanCAPA$POPULATION)
+
+print("Removed Population")
+print(removed.pop)
+
+# What happens to summary statistics for median house value?
+CAPA.median.HV <- summary(CAPA$Median_house_value)
+cleanCAPA.median.HV <- summary(cleanCAPA$Median_house_value)
+
+print("Median House Value - before cleaning")
+print(CAPA.median.HV)
+print("Median House Value - after cleaning")
+print(cleanCAPA.median.HV)
+
+# What happens to summary statistics for median income?
+CAPA.median.I <- summary(CAPA$Median_household_income)
+cleanCAPA.median.I <- summary(cleanCAPA$Median_household_income)
+
+print("Median Income - before cleaning")
+print(CAPA.median.I)
+print("Median Income - after cleaning")
+print(cleanCAPA.median.I)
+
+```
+
+After removing all rows containing NA values, our dataframe reduces from `r nrow(CAPA)` observations to `r nrow(cleanCAPA)` observations (`r removed`). The population of the removed cases sums to 2.2 million.  After removing the rows containing NA's, the mean value of the median household value drops by approximately $1,000 ($345,500 to $344,400). Furthermore, the mean value of the median income drops by approximately $2,000/yr ($62,950 to $60,620) after removing the lines containing NAs. 
+
+\break
+
+##2. House value and income
+###2.a. Linearly regress median house value on median income
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2.a. linearly regress median house value (Y) on median household income (X)
+median.income.fit <- lm(Median_house_value ~ Median_household_income, data = cleanCAPA)
+kable(coefficients(summary(median.income.fit)), digits = 1)
+
+```
+
+The intercept for this regression is 33,672; the average median house value for any tract, given an average median household income of $0 is $33,672/yr. This may not be interpretable, since housing valuation may change for persons of low to zero income. 
+
+
+The median houeshold income coefficient is 5.12, suggesting that average median house value increases by $5.12 given an average household income increase of $1/yr.
+
+###2.b. Linearly regress median house value on mean income
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2.b. linearly regress median house value (Y) on mean household income (X)
+mean.income.fit <- lm(Median_house_value ~ Mean_household_income, data = cleanCAPA)
+kable(coefficients(summary(mean.income.fit)), digits = 1)
+
+
+```
+
+After regressing median house value on mean household income, the intercept for this regression decreases to -3,816. Therefore, the average median house value for any tract, given an average median household income of $0 is less than zero (-$3,861). A negative house value is impossible; therefore one should not interpret this intercept. 
+
+The median household income coefficient is 4.66, suggesting that average median house value increases by $4.66 given an average household income increase of $1/yr.
+
+The coefficients for the two different measure of household incomes are different because the average values for median household income and mean household income across the various tracts are different. The average mean household income is larger than the average median household income, suggesting a positive skewness in the income data for each of the tracts. Therefore, a unit increase in the average mean household income of a particular tract will not increase the predicted average house value quite as much as a unit increase in median household income.
+
+###2.c. Linearly regress median house value on both mean and median household
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2.c. linearly regress median house value (Y) on mean household income (X1) 
+#and median household income (X2)
+meanANDmedian.income.fit <- lm(Median_house_value ~ Mean_household_income + 
+                                 Median_household_income, 
+                               data = cleanCAPA)
+kable(coefficients(summary(meanANDmedian.income.fit)), digits = 1)
+
+```
+
+After regressing median house value on mean and median household income, the intercept for this regression decreases to increases to -2,413. Therefore, the average median house value for any tract, given an average mean and median household income of $0 is less than zero (-$2,413). Still, this intercept would not be interpretted to mean anything as a negative house value is impossible   
+
+The median household income coefficient is -1.37, suggesting that average median house value decreases by $1.37 given a median household income increase of $1/yr, while holding mean household income constant (and not considering potentially omitted variables).The mean household income coefficient is 5.76, suggesting that average median house value increases by $5.75 given a mean household income increase of $1/yr, while holding median household income constant (and not considering potentially omitted variables). 
+
+As the previous regressions indicated that average mean household income had a stronger (larger slope coefficient) on average median house value than average median household income, it seems inappropriate that the coefficient for the median would be negative (though, small) compared to the positive coefficient for the average mean household income.These differences in coefficients are attributed to omitted variable bias; the mean and median household incomes are correlated and median house value should be regressed on one or the other. 
+
+ \break
+
+##3. Linear regression of median house value on various variables
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 3. regress median house value (Y) on median income (X1), mean income (X2), 
+#   population (X3), number of housing units (X4), number of vacant units (X5)
+#   percentage of owners (X6), medien number of rooms (X7), 
+#   mean household size of homeowners (X8), and mean household size of renters (X9)
+large.regression <- lm(Median_house_value ~ Median_household_income + 
+                         Mean_household_income + POPULATION +
+                         Total_units + Vacant_units + Owners + 
+                         Median_rooms + Mean_household_size_owners + 
+                         Mean_household_size_renters,
+                       data = cleanCAPA)
+kable(coefficients(summary(large.regression)), digits = 1)
+
+```
+
+
+The median household income coefficient is 1.64, suggesting that average median house value increases by 1.64 given a unit increase of median household income increase, while holding all other variables constant. The mean household income coefficient is 5.43, suggesting that average median house value increases by 5.43 given a unit increase of mean household income increase, while holding all other variables constant. The population coefficient is -5.38, suggesting that average median house value decreases by 5.38 given a unit increase of tract population, while holding all other variables constant. The total units coefficient is 12.93, suggesting that average median house value increases by 12.93 given a unit increase of the total number of units, while holding all other variables constant. The vacant units coefficient is -31.36, suggesting that average median house value decreases by 31.36 given a unit increase of the total number of vacant units, while holding all other variables constant. The owners coefficient is -1647, suggesting that average median house value decreases by 1,647 given a unit increase of the number of people per household which owns the home, while holding all other variables constant. The median rooms coefficient is -82769, suggesting that average median house value decreases by 82769 given a unit increase of the median number of room units, while holding all other variables constant. The mean household size (owners) coefficient is 15,145, suggesting that average median house value increases by 15,145 given a unit increase of the mean household size of owners, while holding all other variables constant.The mean household size (renters) coefficient is 13763, suggesting that average median house value increases by 13,763 given a unit increase of the mean household size of renters, while holding all other variables constant. 
+
+The coefficients on income are different from in the previous models due to other variables capturing a portion of the variance in predicted house value versus observed house value. 
+
+##4. Checking residuals from problem 3
+###4.a. Q-Q plot of residuals
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4.a. making a q-q plot of standardized residuals from problem 3
+large.regression.stdres = rstandard(large.regression)
+qqnorm(large.regression.stdres)
+qqline(large.regression.stdres)
+
+```
+
+The Q-Q plot of the standardized residuals seems to depict non-normality with the residuals in addition to slight assymetry.
+
+###4.b. Residual scatter plots with kernal smoother curves
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, out.width="0.25\\textwidth"}
+
+# 4.b. Example code of scatter-plots of residuals with kernal smoother curves
+# X1: median household income
+plot(cleanCAPA$Median_household_income, 
+     large.regression.stdres, 
+     main="Median Household Income",
+     xlab = "Med. Household Income", 
+     ylab = "St. Residuals")
+rug(cleanCAPA$Median_household_income, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Median_household_income)
+bw <- sd(cleanCAPA$Median_household_income)*
+      length(cleanCAPA$Median_household_income)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Median_household_income, 
+               y = large.regression.stdres, 
+               bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, cache=TRUE, out.width="0.48\\textwidth"}
+# X2: mean household income
+plot(cleanCAPA$Mean_household_income, large.regression.stdres, 
+     main="Mean Household Income",
+     xlab = "Mean Household Income", ylab = "St. Residuals")
+rug(cleanCAPA$Mean_household_income, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Mean_household_income)
+bw <- sd(cleanCAPA$Mean_household_income)*
+      length(cleanCAPA$Mean_household_income)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Mean_household_income, 
+               y = large.regression.stdres, 
+               bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+# X3: population
+plot(cleanCAPA$POPULATION, large.regression.stdres, main="POPULATION",
+     xlab = "POPULATION", ylab = "St. Residuals")
+rug(cleanCAPA$POPULATION, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$POPULATION)
+bw <- sd(cleanCAPA$POPULATION)*length(cleanCAPA$POPULATION)^(-1/5)
+lp <- locpoly( x = cleanCAPA$POPULATION, y = large.regression.stdres, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+# X4: number of housing units
+plot(cleanCAPA$Total_units, large.regression.stdres, main="Total Housing Units",
+     xlab = "Total Housing Units", ylab = "St.Residuals")
+rug(cleanCAPA$Total_units, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Total_units)
+bw <- sd(cleanCAPA$Total_units)*length(cleanCAPA$Total_units)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Total_units, y = large.regression.stdres, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+# X5: number of vacant units
+plot(cleanCAPA$Vacant_units, large.regression.stdres, main="Vacant Units",
+     xlab = "Vacant Units", ylab = "St. Residuals")
+rug(cleanCAPA$Vacant_units, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Vacant_units)
+bw <- sd(cleanCAPA$Vacant_units)*length(cleanCAPA$Vacant_units)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Vacant_units, y = large.regression.stdres, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+
+# X6: percentage of owners
+plot(cleanCAPA$Owners, large.regression.stdres, main="Percentage of Owners",
+     xlab = "% of Owners", ylab = "St. Residuals")
+rug(cleanCAPA$Owners, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Owners)
+bw <- sd(cleanCAPA$Owners)*length(cleanCAPA$Owners)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Owners, y = large.regression.stdres, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+# X7: medien number of rooms
+plot(cleanCAPA$Median_rooms, large.regression.stdres, main="Median No. of Rooms",
+     xlab = "Median No. of Rooms", ylab = "St. Residuals")
+rug(cleanCAPA$Median_rooms, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Median_rooms)
+bw <- sd(cleanCAPA$Median_rooms)*length(cleanCAPA$Median_rooms)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Median_rooms, y = large.regression.stdres, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+# X8: mean household size of homeowners
+plot(cleanCAPA$Mean_household_size_owners, large.regression.stdres, main="Mean Household Size of Homeowners",
+     xlab = "Mean Size Owners", ylab = "St. Residuals")
+rug(cleanCAPA$Mean_household_size_owners, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Mean_household_size_owners)
+bw <- sd(cleanCAPA$Mean_household_size_owners)*length(cleanCAPA$Mean_household_size_owners)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Mean_household_size_owners, y = large.regression.stdres, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+
+# X9: mean household size of renters
+plot(cleanCAPA$Mean_household_size_renters, large.regression.stdres, main="Mean Size of Renters",
+     xlab = "Mean Size Renters", ylab = "St. Residuals")
+rug(cleanCAPA$Mean_household_size_renters, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Mean_household_size_renters)
+bw <- sd(cleanCAPA$Mean_household_size_renters)*length(cleanCAPA$Mean_household_size_renters)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Mean_household_size_renters, y = large.regression.stdres, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+```
+
+As depicted above in the example code, the locpoly function from the KernSmooth package is used to plot the kernal smoother curve. This function estimates a probability density function, regression function or their derivatives using local polynomials. Bandwidth was defined using the rule of thumb %sigma*n^(-1/5)%.
+
+From these plots, we tend to see larger variation in residuals near the smaller predictor values than in the larger predictor values. However, the residuals seems to be centered around zero for all predictor variables.
+
+###4.c. Scatter plots of squared residuals
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, out.width="0.48\\textwidth"}
+
+# 4.c. Example of scatter-plots of squared residuals 
+#     with kernal smoother curves over squared residuals
+# first, square the residuals
+sq.resid <- (large.regression.stdres)^2
+
+# X1: median household income
+
+plot(cleanCAPA$Median_household_income, 
+     sq.resid, main="Median Household Income",
+     xlab = "Med. Household Income", ylab = "Sq. St. Residuals")
+rug(cleanCAPA$Median_household_income, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Median_household_income)
+bw <- sd(cleanCAPA$Median_household_income)*
+        length(cleanCAPA$Median_household_income)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Median_household_income, 
+               y = sq.resid, 
+               bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, cache=TRUE, out.width="0.48\\textwidth"}
+# X2: mean household income
+plot(cleanCAPA$Mean_household_income, sq.resid, main="Mean Household Income",
+     xlab = "Mean Household Income", ylab = "Sq. St. Residuals")
+rug(cleanCAPA$Mean_household_income, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Mean_household_income)
+bw <- sd(cleanCAPA$Mean_household_income)*length(cleanCAPA$Mean_household_income)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Mean_household_income, y = sq.resid, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+# X3: population
+plot(cleanCAPA$POPULATION, sq.resid, main="POPULATION",
+     xlab = "POPULATION", ylab = "Sq. St. Residuals")
+rug(cleanCAPA$POPULATION, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$POPULATION)
+bw <- sd(cleanCAPA$POPULATION)*length(cleanCAPA$POPULATION)^(-1/5)
+lp <- locpoly( x = cleanCAPA$POPULATION, y = sq.resid, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+# X4: number of housing units
+plot(cleanCAPA$Total_units, sq.resid, main="Total Housing Units",
+     xlab = "Total Housing Units", ylab = "Sq. St. Residuals")
+rug(cleanCAPA$Total_units, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Total_units)
+bw <- sd(cleanCAPA$Total_units)*length(cleanCAPA$Total_units)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Total_units, y = sq.resid, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+# X5: number of vacant units
+plot(cleanCAPA$Vacant_units, sq.resid, main="Vacant Units",
+     xlab = "Vacant Units", ylab = "Sq. St. Residuals")
+rug(cleanCAPA$Vacant_units, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Vacant_units)
+bw <- sd(cleanCAPA$Vacant_units)*length(cleanCAPA$Vacant_units)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Vacant_units, y = sq.resid, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+
+# X6: percentage of owners
+plot(cleanCAPA$Owners, sq.resid, main="Percentage of Owners",
+     xlab = "% of Owners", ylab = "Sq. St. Residuals")
+rug(cleanCAPA$Owners, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Owners)
+bw <- sd(cleanCAPA$Owners)*length(cleanCAPA$Owners)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Owners, y = sq.resid, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+# X7: medien number of rooms
+plot(cleanCAPA$Median_rooms, sq.resid, main="Median No. of Rooms",
+     xlab = "Median No. of Rooms", ylab = "Sq. St. Residuals")
+rug(cleanCAPA$Median_rooms, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Median_rooms)
+bw <- sd(cleanCAPA$Median_rooms)*length(cleanCAPA$Median_rooms)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Median_rooms, y = sq.resid, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+# X8: mean household size of homeowners
+plot(cleanCAPA$Mean_household_size_owners, sq.resid, main="Mean Household Size of Homeowners",
+     xlab = "Mean Size Owners", ylab = "Sq. St. Residuals")
+rug(cleanCAPA$Mean_household_size_owners, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Mean_household_size_owners)
+bw <- sd(cleanCAPA$Mean_household_size_owners)*length(cleanCAPA$Mean_household_size_owners)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Mean_household_size_owners, y = sq.resid, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+
+
+# X9: mean household size of renters
+plot(cleanCAPA$Mean_household_size_renters, sq.resid, main="Mean Size of Renters",
+     xlab = "Mean Size Renters", ylab = "Sq. St. Residuals")
+rug(cleanCAPA$Mean_household_size_renters, col = "yellow")
+
+# next plot the kernal smoother curve
+gridsize <- length (cleanCAPA$Mean_household_size_renters)
+bw <- sd(cleanCAPA$Mean_household_size_renters)*length(cleanCAPA$Mean_household_size_renters)^(-1/5)
+lp <- locpoly( x = cleanCAPA$Mean_household_size_renters, y = sq.resid, bandwidth = bw, gridsize = gridsize)
+lines(lp$x, lp$y, col = "red")
+
+
+```
+
+After squaring the residuals, outliers become more apparent. We see outliers for mean and median incomes versus residual plots. This supports the finding that intercepts changed based on regressions of median verus mean income - the income is non-normal, with positive skewness. Other outliers shown in population or total housing units, may simply be due to extra data points in those areas compared to higher values (as demonstrated by the yellow ticks). 
+
+###4.d. Gaussian or independent predictors?
+As all kernal smoother lines appeared to not diverge too drastically from zero in any of the plots, it seems appropriate to conclude that the conditional mean seems independent of the predictors. However, the variance does not appear inependent of the predictors - there seemed to be some cones depicting higher variance in some values of the predictor variables (heteroskedasticity).
+
+The q-q plot of the residuals also appears to show non-normal (non-Gaussian) character, as there appears to be a fat tail in lower quantiles. Furthermore, residuals are not exactly symmetric across the normality line. 
+
+##5. Fit model from 3 to Californai and Pennsylania
+###5.A. Report the two sets of coefficients and standard errors
+
+**Model from problem 3 fitted to CA data**
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 5.a. Report two sets of coefficients and standard errors. 
+# First, spit the dataframe into California and Pennsylvania
+CA.CAPA <- cleanCAPA[cleanCAPA[,3] == 6, ]
+PA.CAPA <- cleanCAPA[cleanCAPA[,3] != 6, ]
+
+# Fit the model from problem 3 to California Data
+CA.rm <- lm(Median_house_value ~ Median_household_income + 
+              Mean_household_income + 
+              POPULATION +
+              Total_units + Vacant_units + 
+              Owners + Median_rooms + 
+              Mean_household_size_owners + 
+              Mean_household_size_renters,
+              data = CA.CAPA)
+kable(coefficients(summary(CA.rm)), digits = 1)
+```
+
+**Model from Problem 3 fitted to PA data**
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+# Fit the model from problem 3 to Pennsylvania Data
+PA.rm <- lm(Median_house_value ~ Median_household_income + 
+              Mean_household_income + 
+              POPULATION +
+              Total_units + Vacant_units + 
+              Owners + Median_rooms + 
+              Mean_household_size_owners + 
+              Mean_household_size_renters,
+              data = PA.CAPA)
+kable(coefficients(summary(PA.rm)), digits = 1)
+
+```
+
+From comparison of the two sets of coefficients, we find that the intercept is much larger for California ($280,000) than it is for Pennsylvania ($60,000), suggesting home values are larger in this state, when mean value income and any of the other predictor variables are set to zero. Therefore, one might conclude that home values are larger in California than in Pennsylvania, which seems reasonable. Furthermore, median household income is not a significant predictor of home value for California, which suggests there is a wider income gap in this state than in PA (also reasonable to assume). 
+
+It seems reasonable to assume that the true coefficients for each of these regressions are different for each state, since they are based on averaged census tract data for each state. However, it is inappropriate to assume that the coefficients of our model directly reflect the true coefficients - as true home valuation is unlikely a linear model of the aforementioned variables.
+
+###5.b. Report the RMSE for Cal and Penn
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 5.b. Calculate RMSE for the regressions for each state
+rmse <- function(residuals)
+  {
+  sqrt(mean(residuals^2))
+  }
+
+CA.rmse <- rmse(CA.rm$residuals)
+print("CA RMSE")
+print(CA.rmse)
+
+PA.rmse <- rmse(PA.rm$residuals)
+print("PA RMSE")
+print(PA.rmse)
+
+```
+
+###5.c. Use PA estimates to predict CA, find RMSE
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 5.c. use PA estimates to predict CA and find that RMSE
+CA.predict <- predict(PA.rm, newdata=CA.CAPA)
+
+# calculate residuals for prediction (y-yhat) = (observed CA median household - predicted)
+CA.predict.res <- CA.CAPA$Median_house_value - CA.predict
+
+# calculate RSME for these residuals
+CA.predict.rmse <- rmse(CA.predict.res)
+print("RSME of PA predicting CA")
+print(CA.predict.rmse)
+
+# what is the correlation between PA's predictions and the CA fitted values?
+# correlation coeficient of two variables in a data sample 
+# is their covariance divided by the product of their individual standard deviations
+# r(xy) = s(xy)/s(x)*s(y)
+# cor returns the correlation coefficient
+correlation <- cor(CA.predict, fitted(CA.rm))
+print("Correlation")
+print(correlation)
+
+```
+
+Since the correlation is 0.93 (close to 1), we conclude that PA's coefficients' predictions for California are positively correlated with CA coefficients' predictions. 
+
+##6. Map regression residuals for Problem 3 model
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# map the regression residuals, y = long, x = lat
+US.map <- getMap(resolution = "low")
+plot(US.map, col = "gray",
+     xlim = c(-125, -65),
+     ylim = c(25, 52),
+     xlab = "Longitude",
+     ylab = "Latitude",
+     asp = 1)
+
+# rank the cleanCAPA dataframe in terms of residual size
+cleanCAPA$residuals <- large.regression$residuals
+
+# order cleanCAPA based on residual size
+cleanCAPA.sorted <- cleanCAPA[order(cleanCAPA$residuals),]
+
+n <- length(cleanCAPA.sorted$residuals)
+colors <- heat.colors(n, alpha = 1)
+colors.sorted <- colors[order(colors)]
+
+points(cleanCAPA.sorted$LONGITUDE, cleanCAPA.sorted$LATITUDE,
+     col = colors.sorted,
+     cex = .6)
+
+# where red is overpredicting
+# where white is underpredicting
+```
+
+As red indicates the smallest residual values (i.e. negative ) and white represents larger residual values (i.e. positive), it seems the CA model underpredicts at the coast and overpredicts inland. 
+
+##7. Fit a linear regression from problem 3 with latitude and longitude
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+#7. add lat and long to large.regression
+part7.rm <- lm(Median_house_value ~ Median_household_income + 
+                 Mean_household_income + POPULATION +
+               Total_units + Vacant_units + 
+                 Owners + Median_rooms + 
+                 Mean_household_size_owners + 
+                 Mean_household_size_renters + 
+                 LATITUDE + LONGITUDE,
+                 data = cleanCAPA)
+kable(coefficients(summary(part7.rm)), digits = 1)
+
+
+```
+
+The coefficients for the latitude and longitude suggest that median house value is influenced by geographic location, which seems reasonable. In fact, the average median house value decreases by $8,526 when latitude increases by 1 degree (holding all other variables constant). The average median house value decreases by $2,661 when longitude increases by 1 degree (holding all other variables constant). Coastal regions in california will higher median house values, which are currently underpredicted in our model (depicted in previous map).
+
+##8. Make a map of the regression residuals for new model for problem 7
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# map the regression residuals from problem 7, y = long, x = lat
+US.map <- getMap(resolution = "low")
+plot(US.map, col = "gray",
+     xlim = c(-125, -65),
+     ylim = c(25, 52),
+     xlab = "Longitude",
+     ylab = "Latitude",
+     asp = 1)
+
+# rank the cleanCAPA dataframe in terms of residual size - negatives are low values
+cleanCAPA$residuals.p7 <- part7.rm$residuals
+
+# order cleanCAPA based on residual size
+cleanCAPA.sorted.p7 <- cleanCAPA[order(cleanCAPA$residuals.p7),]
+
+n2 <- length(cleanCAPA.sorted.p7$residuals.p7)
+colors2 <- heat.colors(n2, alpha = 1)
+colors.sorted2 <- colors2[order(colors2)]
+
+points(cleanCAPA.sorted.p7$LONGITUDE, cleanCAPA.sorted.p7$LATITUDE,
+     col = colors.sorted2,
+     cex = .6)
+# where red is underpredicting
+# where white is overpredicting
+
+
+
+```
+
+The new model from problem 7 seems worse. Here we see more underprediction at the CA coast and more overprediction in inland CA. Additionally, we see further underprediction in the eastern part of PA. 
+
+## Problems 9-10 in attached PDF.
+

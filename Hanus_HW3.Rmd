@@ -1,0 +1,587 @@
+---
+title: "Homework 3"
+author: "Nichole Hanus"
+date: "2/4/16"
+output: pdf_document
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Set the directory
+setwd("~/2. Courses/36-608 Advanced Data Analysis/HW 3")
+
+# Install required libraries and packages
+install.packages("formula.tools", repos = "http://cran.us.r-project.org")
+library(formula.tools) 
+
+# to fit distributions from data set
+install.packages("MASS", repos = "http://cran.us.r-project.org")
+library(MASS) 
+
+# for pretty tables
+install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr) 
+
+# for npreg
+install.packages("np",dependencies=TRUE, repos = "http://cran.us.r-project.org")
+library(np) 
+
+# Read in  stocks data
+stocks <- read.csv("~/2. Courses/36-608 Advanced Data Analysis/HW 3/stock_history.csv", header=TRUE)
+
+```
+
+##1. Inventing a variable 
+###1.a. Add MAPE
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 1.a. Add MAPE
+# MAPE is the ratio of Price to Earnings_10MA-back
+
+stocks$MAPE <- stocks$Price/stocks$Earnings_10MA_back
+summary(stocks$MAPE)
+
+```
+
+We see that the variable MAPE meets the reported summary statistics. There are exactly 120 NAs because there are exactly 120 NAs for the Earnings_10MA_back. This is because the first 10 years cannot report an Earnings_10MA_back, and there exist 12 months (data entries) for each year. 10*12=120.
+
+###1.b. Regress Returns on MAPE
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 1.b. Linearly regress returns on MAPE
+# Report coefficient and its standard error
+
+MAPE.lm <- lm(Return_10_fwd ~ MAPE, data = stocks)
+kable(coefficients(summary(MAPE.lm)), digits = 4)
+
+```
+
+
+The coefficient for MAPE is -0.0046 with a standard error of 0.0002. This is a significant value. We interpret the MAPE coefficient as follows: there is an decrease of 0.0046 units of average returns given a unit increase of MAPE. Therefore, as the ratio of Price to Earings_10MA_back (i.e. as the price to expected earnings increaes) increases by 1, the average rate of return should increase by 0.46% points.
+
+###1.c. The MSE of model
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 1.c. What is the MSE of this model, under five-fold CV?
+
+# Use code from Lecture 3
+# re-write the regression formula
+MAPE.lm_formula <- "Return_10_fwd ~ MAPE"
+MAPE.lm_formula <- as.formula(MAPE.lm_formula)
+
+formulae <- c(MAPE.lm_formula, MAPE.lm_formula)
+
+# Use response.name function from lecture notes
+response.name <- function(formula) {
+  var.names <- all.vars(formula)
+  return(var.names[1])
+}
+
+## ----kfold-cv-for-linear-models------------------------------------------
+# General function to do k-fold CV for a bunch of linear models
+  # Inputs: dataframe to fit all models on,
+    # list or vector of model formulae,
+    # number of folds of cross-validation
+  # Output: vector of cross-validated MSEs for the models
+cv.lm <- function(data, formulae, nfolds) {
+  # Strip data of NA rows
+    # ATTN: Better to check whether NAs are in variables used by the models
+  data <- na.omit(data)
+  # Make sure the formulae have type "formula"
+  formulae <- sapply(formulae, as.formula)
+  # Extract the name of the response variable from each formula
+    # ATTN: CV doesn't make a lot of sense unless these are all the same!
+  responses <- sapply(formulae, response.name)
+  names(responses) <- as.character(formulae)
+  n <- nrow(data)
+  # Assign each data point to a fold, at random
+    # see ?sample for the effect of sample(x) on a vector x
+  fold.labels <- sample(rep(1:nfolds, length.out=n))
+  mses <- matrix(NA, nrow=nfolds, ncol=length(formulae))
+  colnames <- as.character(formulae)
+  # EXERCISE: Replace the double for() loop below by defining a new
+  # function and then calling outer()
+  for (fold in 1:nfolds) {
+    test.rows <- which(fold.labels == fold)
+    train <- data[-test.rows,]
+    test <- data[test.rows,]
+    for (form in 1:length(formulae)) {
+       # Fit the model on the training data
+       current.model <- lm(formula=formulae[[form]], data=train)
+       # Generate predictions on the testing data
+       predictions <- predict(current.model, newdata=test)
+       # Get the responses on the testing data
+       test.responses <- test[,responses[form]]
+       # Calculate errors
+       test.errors <- test.responses - predictions
+       # Calculate the MSE on that fold
+       mses[fold, form] <- mean(test.errors^2)
+    }
+  }
+  return(colMeans(mses))
+}
+
+cv.lm(data = stocks, formulae = formulae, nfolds = 5)
+
+```
+
+The MSE of this model, under five-fold CV is 0.001867881.
+
+##2. Inverting a variable
+###2.a. Linearly regress the returns on 1/MAPE
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2.a. Linearly regress the returns on 1/MAPE 
+# I() allows the operators to be used in their arithmetic sense
+MAPEinvert.lm <- lm(Return_10_fwd ~ I(1/MAPE), data = stocks)
+
+
+kable(coefficients(summary(MAPEinvert.lm)), digits = 4)
+
+```
+
+We find the coefficients to increase for the inverse of MAPE. Now the coefficient equals 0.9959; a one unit increase in the inverse of MAPE results in an average increase of Returns of 99.59%. This is expected, as the coefficient is essentially 1-coefficient for MAPE in the previous model. The standard error for this coefficient is 0.0365 and it is significant. 
+
+###2.b. Check CV MSE of inverse model
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2.b. What is the MSE of this model, under five-fold CV?
+
+# re-write the regression formula for question 2
+MAPEinvert.lm_formula <- "Return_10_fwd ~ I(1/MAPE)"
+MAPEinvert.lm_formula <- as.formula(MAPEinvert.lm_formula)
+
+formulae.invert <- c(MAPEinvert.lm_formula, MAPEinvert.lm_formula)
+
+cv.lm(data = stocks, formulae = formulae.invert, nfolds = 5)
+
+```
+
+The MSE is nearly the same for this model: 0.001839506. It should be similar or the same as the problem 1 model since this model is comprised of the same variables. 
+
+##3. Employing a variable
+###3.a. In-sample MSE
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 3.Find the simple-minded model
+
+# Future returns = difference in past 10 yr return and price over price
+stocks$simple.returns <- (stocks$Earnings_10MA_back)/(stocks$Price)
+
+# 3.a.  Find in-sample MSE of this model
+
+# First, calculate the residuals
+simple.diff <- na.omit(stocks$Return_10_fwd - I(1/stocks$MAPE))
+
+# find MSE
+sample.MSE <- mean(simple.diff^2, na.rm = TRUE)
+print(sample.MSE)
+
+```
+
+The in-sample MSE is 0.001896346.
+
+###3.b. MSE is uniased estimate of the generalization error
+The in-sample MSE is an unbiased estimate of the generalization error for this particular model because it is the MSE of the population from which the sample is drawn (i.e. it is equal to the parameter it is estimating).
+
+\break
+
+###3.c. Q-Q Plot
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 3.c. Make Q-Q plot for the residuals of this model
+
+# scale the MSE before plotting on Q-Q plot
+simple.diff.scale <- scale(simple.diff)
+
+qqnorm(simple.diff.scale)
+qqline(simple.diff.scale)
+
+```
+
+The q-q plot demonstrates that the residuals for the simple-minded model do no appear to have a nearly Gaussian distribution. We see symetric tails and not heavy tails. 
+
+###3.d. Plot histogram and t-dist
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 3.d. Estimate a t distribution from the residuals
+(t.dist <- fitdistr(na.omit(simple.diff),"t"))
+
+# plot the histogram of differences
+# freq = FALSE plots component density, total area equals 1
+hist(simple.diff, 
+     freq=FALSE, 
+     xlab="Residuals",
+     main="Distribution of Residuals")
+
+# include the t-distribution curve
+# Use code from class 1.18.16 lecture:
+
+# Add the t-distribution density curve
+  # R has a built-in density for the t distribution, dt(), but we need
+  # to deal with the shift and the scale
+dt.fitted <- function(x,fitted.t=t.dist) {
+  m <- fitted.t$estimate["m"]
+  s <- fitted.t$estimate["s"]
+  df <- fitted.t$estimate["df"]
+  return((1/s)*dt((x-m)/s,df=df)) # what the (1/s) factor?
+}
+# Finally, plot the density of the fitted t distribution
+curve(dt.fitted(x),add=TRUE,col="blue",lwd=3)
+  # Looks definitely more promising, if not necessarily right
+
+
+```
+
+This t-distribution appears to be a good fit for the residuals.
+
+\break
+
+##4. Kernal regression of the returns on MAPE
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4. kernal regression of returns on MAPE
+(kernel.model <- npreg(Return_10_fwd ~ MAPE, data = stocks))
+
+# check bandwidth compared to MAPE spread
+summary(stocks$MAPE)
+
+print(kernel.model$bws$fval)
+
+```
+
+The bandwidth is 0.58, which is rather small compared to the spread of MAPE(4.785 to 44.2).
+
+The cross-validated MSE is 0.001692716, which is actually lower than the previous CV MSE values (~ 0.0019).
+
+##5. One big happy plot
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 5.a. Make a scatter-plot of the returns against MAPE
+plot(stocks$MAPE, 
+     stocks$Return_10_fwd, 
+     main="Big Happy Plot",
+     xlab = "MAPE", 
+     ylab = "Returns",
+     ylim = c(-0.5,0.5),
+     xlim = c(0, 45))
+
+# 5.b. Add line from linear regression in problem 1
+abline(MAPE.lm, col = "blue")
+
+# 5.b. Add line from linear regression in problem 2
+abline(MAPEinvert.lm, col = "red")
+
+# 5.c. Add line from simple-minded model
+lines(stocks$MAPE,stocks$simple.returns, col = "orange")
+
+# 5.d. Add line from kernal regression to plot
+# create dataframe for npreg results
+npreg.MAPE <- as.vector(kernel.model$eval) #these are MAPE x-values
+npreg.Returns <- as.vector(fitted(kernel.model))
+npreg.df <- data.frame(npreg.MAPE, npreg.Returns)
+
+# sort dataframe by ascending MAPE
+npreg.df.sort <- npreg.df[order(npreg.MAPE), ]
+lines(npreg.df.sort$MAPE,npreg.df.sort$npreg.Returns, col = "green")
+
+# Add arrows and labels
+arrows(x0=5.19, y0=0.36, x1=0.4396756 , y1=0.36)
+text(x=5.2, y=0.36, label="Inverse MAPE fit", pos = 4, cex=0.7)
+
+arrows(x0=2.602453, y0=-.04, x1=2.602453 , y1=0.12924926)
+text(x=2, y=-0.042, label="MAPE fit", pos = 4, cex=0.7)
+
+arrows(x0=42.25336, y0=0.25, x1=42.25336 , y1=0.02676086)
+text(x=38, y=0.27, label="Simple-minded", pos = 4, cex=0.7)
+
+arrows(x0=36.00534, y0=-.23, x1=36.00534 , y1=0.00113876)
+text(x=34.5, y=-.26, label="Kernel", pos = 4, cex=0.7)
+
+```
+
+From this plot, we see that the kernel regression line (green) most closely resembles the simple-minded line (orange). These lines follow each other rather closesly until MAPE increases pase 30. At this point, the simple-minded model over-predits every point. 
+
+##6. Simulating the simple-minded model
+###6.a. Development of simple-minded simulation
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 6.a write a function that simulates the simple-minded model
+
+# Using the fitdistr() function, we fit the t-distribution
+# to the simple-minded model: stocks$simple.returns <- (stocks$Earnings_10MA_back)/(stocks$Price)
+t.simple <- fitdistr(na.omit(stocks$simple.returns), "t")
+
+# The standard t-distribution is centered around 0 and has scale 1
+# We need to shift the center by m and change the scale by s
+# therefore, (x-m)/s has a standard t distribution
+
+# need to determine the t-distribution parameters from this model
+m  <- t.simple$estimate["m"]
+s  <- t.simple$estimate["s"]
+df <- t.simple$estimate["df"]
+MAPE <- na.omit(stocks$MAPE)
+
+# function input: takes MAPE vector and three parameters of t-dist
+# output: dataframe with MAPE and inv. MAPE plus t-distributed noise
+simple.sim <- function(MAPE, m, s, df){
+  t <- rt(n = length(MAPE), df = df)
+  noise <- s*t+m
+  invMAPE  <- (1/MAPE) + noise
+  df.model <- data.frame(invMAPE, MAPE)
+  return(df.model)
+}
+
+# make output dataframe to check with stocks dataframe
+simulation.df <- simple.sim(MAPE, m, s, df)
+
+# check to see if output is what it should be
+# does summary statistics for MAPE in the output dataframe match the stocks dataframe?
+summary(simulation.df$MAPE)
+summary(stocks$MAPE)
+
+# does summary statistics for Inv. MAPE roughly follow the summary stats from stocks dataframe?
+summary(simulation.df$invMAPE)
+summary(1/stocks$MAPE)
+
+# does output inverse MAPE follow a t-distribution? explore graphically
+hist(simulation.df$invMAPE,
+     xlab = "Inverse MAPE",
+     main = "Distribution of Inverse Mape")
+```
+
+It appears the output dataframe contains to vectors, MAPE and Inverse MAPE, that have the anticipated summary statistics.Furtheremore, there is the correct number of rows (1724-120=1604) and correct number of columns (2).
+
+\break
+
+###6.b. Simulate model from problem 2
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 6.b. Simulate the linear regression from problem 2
+
+# Function input: dataframe
+# performs same linear regression as in problem 2: 
+# MAPEinvert.lm <- lm(Return_10_fwd ~ I(1/MAPE), data = stocks)
+# Output: coefficient on variable 1/MAPE
+
+regression.sim <- function(dataframe){
+  invertMAPE.fit.sim <- lm(Return_10_fwd ~ I(1/MAPE), data = dataframe)
+  coefficient <- coef(summary(invertMAPE.fit.sim))["I(1/MAPE)","Estimate"]
+  return(coefficient)
+}
+
+# perform check with previous model
+regression.sim(stocks)
+coef(summary(MAPEinvert.lm))["I(1/MAPE)","Estimate"]
+
+```
+
+###6.c. Simulate the prob of observed coefficient
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 6.c. use simple-minded returns to calculate
+# prob of observing a 1/MAPE coefficient 
+# as far from 1 
+# as the real observed coefficient (assumed to be >= goal coefficient)
+
+# Determine goal distance from 1 of existing inverse model coefficient on simple-minded data
+goal <- abs(1-coef(summary(MAPEinvert.lm))["I(1/MAPE)","Estimate"])
+
+# adjust regression.sim function to look for invMAPE
+# output: 1/MAPE coefficient
+regression.sim2 <- function(dataframe){
+  invertMAPE.fit.sim <- lm(invMAPE ~ I(1/MAPE), data = dataframe)
+  coefficient <- coef(summary(invertMAPE.fit.sim))["I(1/MAPE)","Estimate"]
+  return(coefficient)
+}
+
+# Monte Carlo simulation - calculate 1000 coefficients using the simple-minded model
+sim.coef <- replicate (1000, regression.sim2(simple.sim(MAPE, m, s, df)))
+
+diff <- abs(1-sim.coef)
+matches <- sum(diff >= goal)
+prob <- matches/length(sim.coef)
+print(prob)
+
+```
+
+I found a 88% probability of finding coefficients as far (or greater) from 1 as the 1/MAPE coefficient found in problem 2 (coefficient = 0.995). Therefore, it seems that the simulated models are rather consistently returning coefficients similar to those found in problem 2. 
+
+###6.d P-value of finding slope exactly equal to 1
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 6.d. find p-value for slope equaling exactly 1
+# use the same simulated coefficients to determine number of matches equal to 1
+one.matches <- sum(sim.coef == 1)
+
+# calculate p-value
+p.value <- (1+one.matches)/(length(sim.coef)+1)
+print(p.value)
+
+```
+
+Since the simulated coefficients carry the value out to several decimal places, we find a <0.0005 probability of finding a coefficient exactly equal to one out of the 1000 simulations. Next, we calculate a p-value and perform the following hypothesis test:
+
+Ho: Beta_{1/MAPE} = 1
+
+Ha: Beta_{1/MAPE} $\neq$ 1
+
+We find a p-value of <0.0005, and at the p<0.05 level we reject the null hypothesis that the slope explaining the relationship between 1/MAPE and returns is exactly equal to one.
+
+Next, we try rounding the simulated coefficients to the hundredths place to see if we return more p-values equal to one.
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Round simulated coefficients to hundredths place
+round.coef <- round(sim.coef, 2)
+one.matches2 <- sum(round.coef == 1)
+
+# calculate p-value
+p.value2 <- (1+one.matches2)/(length(sim.coef)+1)
+print(p.value2)
+
+```
+
+We find a p-value of 0.13, and at the p<0.05 level we again reject the null hypotheses that the slope explaining the relationship between 1/MAPE and returns is exactly equal to one.
+
+###6.e. Kernal regression function
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 6.e. Write a function that estimates the same kernel regression as in problem 4
+
+# function input: data frame
+# assume "returns" are in first column and MAPE is in 2nd column
+# estimates kernel regression in problem 4
+# output: vector of fitted values from that regression
+kernel.fun <- function(dataframe){
+  df.1 <- as.numeric(dataframe[ ,1])
+  df.2 <- as.numeric(dataframe[ ,2])
+  kernel.model.2 <- npreg(df.1 ~ df.2)
+  vector <- fitted(kernel.model.2)
+  return(vector)
+}
+
+# develop dataframe of original data that matches column
+# placement requirements for this function
+# i.e. returns are in the first column and MAPE is in second column
+stocks.test <- data.frame(stocks$Return_10_fwd, stocks$MAPE)
+
+# run kernel on stocks.test
+stocks.fitted <- kernel.fun(stocks.test)
+
+# compare fitted results with those from problem 4
+print("problem 4 fitted results")
+print(head(fitted(kernel.model)))
+
+print("function fitted results")
+print(head(stocks.fitted))
+
+# This check looks good!
+
+# check that it works from input from simulation function
+sim.fitted <- kernel.fun(simple.sim(MAPE, m, s, df))
+# look at fitted results of simulation
+print("simulated dataframe input, sample fitted values")
+print(head(sim.fitted))
+
+# This check also looks good!
+
+```
+
+We develop a kernel regression function that takes input as a dataframe, converts it into a numeric dataframe (to be sure), performs a kernel regression on the first column and second column, and outputs fitted values.
+
+We check the results using our stocks dataframe - check is good! We also perform a check using input as the simulated function - check is also good!
+
+###6.f. Plot returns versus MAPE for simple-minded model
+
+I could not find a way to print the graph without the "multistart" also printing... echo = FALSE didn't work, nor did include = FALSE. My apologies!
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 6.f. Create plot of predicted returns versus MAPE for simple-minded
+plot(stocks$MAPE, 
+     stocks$simple.returns, 
+     main="Kernel Regression Performance",
+     xlab = "MAPE", 
+     ylab = "Returns",
+     ylim = c(-0.5,0.5),
+     xlim = c(0, 45),
+     col = "red",
+     cex = 0.7)
+
+# add 200 kernel regression curves, fit to 200 simulations of the model
+All.returns <- replicate(200, kernel.fun(simple.sim(MAPE, m, s, df)))
+npreg.df2 <- data.frame(MAPE, All.returns)
+npreg.df2.sort <- npreg.df2[order(MAPE),]
+
+# break up kernel regression matrix into two distinct matrices for plotting
+# want an x vector of MAPE
+# and a ncol=200 matrix of returns
+MAPE.plot <- npreg.df2.sort$MAPE
+Returns.plot <- npreg.df2.sort[,-1]
+
+# Plot all lines of these kernel regressions
+matlines(MAPE.plot ,Returns.plot, col="dark grey", lty = 1)
+
+# add kernal regression curve from true data as in problem 5
+lines(npreg.df.sort$MAPE,npreg.df.sort$npreg.Returns, col = "black")
+
+# Add arrows and labels
+arrows(x0=8.4, y0=0.37, x1=5.7 , y1=0.23)
+text(x=8.5, y=0.38, label="Simulated Kernel Regressions", pos = 4, cex=0.7)
+
+arrows(x0=11, y0=0.251, x1=8.22 , y1=0.129)
+text(x=11.3, y=0.26, label="Simple-minded", pos = 4, cex=0.7)
+
+arrows(x0=19.5, y0=-0.15, x1=22.397 , y1=0.0153)
+text(x=19, y=-0.18, label="Original Kernel", pos = 4, cex=0.7)
+
+```
+
+From the plot, we see that the simulated simple-minded models all appear to over-predict Returns. This looks like a systematic problem. However, all graphs follow a similar trend. As MAPE increases the original kernel model drops, while the simple-minded model remains constant and the simulated regressions increase in variance. From this, it seems appropriate to claim that the simple-minded model performs better when predicting Returns of lower MAPE values. 
+
+##7. More fun with star-gazing
+###7.a. Linearly regress returns on both MAPE and 1/MAPE
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 7.a. Linearly regress returns on MAPE and 1/MAPE
+# Report coefficients
+MAPE.lm.7a <- lm(Return_10_fwd ~ MAPE + I(1/MAPE), data = stocks)
+kable(coefficients(summary(MAPE.lm.7a)), digits = 4)
+
+```
+
+We find both coefficients for MAPE and 1/MAPE to be significant. The coefficient for MAPE is -0.0023 and the coefficient for 1/MAPE is 0.5910.
+
+###7.b. Linearly regress returns on MAPE, 1/MAPE, and the square of MAPE
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 7.b. Linearly regress returns on MAPE and 1/MAPE and square of MAPE
+# Report coefficients
+MAPE.lm.7b <- lm(Return_10_fwd ~ MAPE + I(1/MAPE) + I(MAPE^2), data = stocks)
+kable(coefficients(summary(MAPE.lm.7b)), digits = 4)
+
+```
+
+We find only one significant coefficient for this regression; 1/MAPE has a significant coefficient value of 0.7356. The coefficients for MAPE and the square of MAPE are not significant.
+
+###7.c. What is going on?
+
+MAPE and the square of MAPE are large numbers compared to 1/MAPE. Since we already saw that 1/MAPE is a decent predictor of returns, then adding MAPE and the square of MAPE to our model creates quite large residuals compared to 1/MAPE. Therefore, we find a low probability that MAPE and the square of MAPE are correlated with Returns compared to 1/MAPE. Therefore, we conclude that the variance in Returns is not explained by MAPE or the square of MAPE.

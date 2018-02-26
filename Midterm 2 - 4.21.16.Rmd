@@ -1,0 +1,788 @@
+---
+title: "Midterm 2"
+author: "Nichole Hanus"
+date: "Friday, April 08, 2016"
+output: pdf_document
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Set the directory
+setwd("~/2. Courses/36-608 Advanced Data Analysis/Midterm 2")
+
+# for pretty tables
+install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr) 
+
+# for mixture models involving latent class models
+install.packages("poLCA",dependencies=TRUE, repos = "http://cran.us.r-project.org")
+library(poLCA) 
+
+# for GAM model
+install.packages("mgcv", repos = "http://cran.us.r-project.org")
+library(mgcv)
+
+
+# for ci test
+install.packages("bnlearn", repos = "http://cran.us.r-project.org")
+library(bnlearn) 
+
+
+# Read Paristan data
+Paristan <- read.csv("~/2. Courses/36-608 Advanced Data Analysis/Midterm 2/paristan.csv", header=TRUE)
+
+
+
+```
+
+# 1. Mixture Model - Attitudes towards the past
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=FALSE, fig.align='center'}
+
+# Check to see if there are relevenent NAs to remove for Attitudes towards past mixture model
+number.na <- nrow(Paristan) - nrow(Paristan[complete.cases(Paristan[,2:6]),])
+number.na
+
+# Since number.na is zero, we proceed with the full Paristan dataset for the Attitudes towards past mixture model
+
+Paristan.2 <- Paristan[complete.cases(Paristan[,2:29]),]
+
+```
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+
+# recode "0" and "1" to be "1" and "2" so that we can us polCA
+Paristan.2[1:1257,2:22] <- Paristan.2[1:1257,2:22]+1
+
+# Develop a mixture model for the "attitudes towards the past" variables
+# Attitudes towards the past variables include: postsocialist, intl.stds, socialist, monarchy, and feudal
+past <- poLCA(cbind(postsocialist, intl.stds, socialist, monarchy, feudal) ~ 1, data=Paristan.2,
+                  nclass=4, verbose=FALSE)
+
+
+
+
+# Take code from Solutions provided to HW9
+
+# Calculate the probability of an array of binary observations under a mixture
+# model
+# Inputs: data (x)
+  # previously estimated mixture model from poLCA (model)
+  # value of baseline category (offset)
+  # flag for returning log probabilities (log)
+# Output: vector of (log) probabilities of each row in x
+# Presumes: x is binary
+  # model is a mixture model for binary observables
+  # number of columns for x matches number of observables for model
+dmultbinarymix <- function(x, model, offset=1, log=FALSE) {
+    # Shift x so it's coded 0/1
+    x <- x-offset
+    # Extract the matrix of conditional probabilities (theta)
+    prob.matrix <- sapply(model$probs, function(mat) { mat[,2] })
+    # If we're using one cluster, this will just be a vector, causing trouble
+    # later, so force it to be an array
+    if (is.null(dim(prob.matrix))) {
+        prob.matrix <- array(prob.matrix, dim=c(1,length(prob.matrix)))
+    }
+    # Extract the class probabilities (lambda)
+    class.probs <- model$P
+    # Calculate the contribution to the probability of one data point coming
+    # from one class
+    class.cond.prob <- function(x,c) {
+        class.probs[c]*prod((prob.matrix[c,]^x)*((1-prob.matrix[c,])^(1-x)))
+    }
+    # Calculate the marginal probability of a single data point
+    one.point.prob <- function(x) {
+        summands <- sapply(1:length(class.probs),
+                           class.cond.prob,
+                           x=x)
+        return(sum(summands))
+    }
+    # Calculate the probabilities of all data points
+    probs <- apply(x, 1, one.point.prob)
+    if (log) {
+        return(log(probs))
+    } else {
+        return(probs)
+    }
+}
+
+# Once we have this function, we can use it to calculate the log-probability
+# of any given data set under any given mixture model.
+
+# Calculate the log-likelihood of a given data set under a multivariate
+# binary mixture model
+# Inputs: data set (data)
+  # previously estimated mixture model from poLCA (model)
+  # value of baseline category (offset)
+# Output: log probability (or likelihood) of the data under the model
+# Presumes: x is binary
+  # model is a mixture model for binary observables
+  # number of columns for x matches number of observables for model
+binarymultmixloglik <- function(data, model, offset=1) {
+    sum(dmultbinarymix(data, model, offset, log=TRUE))
+}
+
+
+# We can check this by computing an in-sample log-likelihood, and comparing it
+# to the log-likelihood already calculated by `poLCA`:
+all.equal(binarymultmixloglik(Paristan.2[,2:6], model=past),
+          past$llik)
+
+
+
+
+# We are now in a position to write the CV function.
+
+# Select number of clusters in poLCA by log-likelihood cross-validation
+# Inputs: data set (data)
+  # formula specifying which variables go into the clustering
+  # vector of numbers of clusters to use (nclusters)
+  # number of folds (nfolds)
+  # optional arguments to poLCA (...)
+# Output: cross-validated log-likelihood for each number of clusters
+# Presumes: all relevant columns of data are binary
+  # no missing values in relevant columns
+cv.poLCA <- function(data, formula, nclusters, nfolds=5, ...) {
+    # initially assign each row to a fold in cyclic sequence
+    folds <- rep(1:nfolds, length.out=nrow(data))
+    # shuffle the order
+    folds <- sample(folds)
+    # make an empty array to store log-likelihoods
+    logliks <- matrix(NA, nrow=length(nclusters), ncol=nfolds)
+    rownames(logliks) <- nclusters
+    for (fold in 1:nfolds) {
+        fold.members <- which(folds == fold)
+        train <- data[-fold.members,]
+        test <- data[fold.members,]
+        for (k in 1:length(nclusters)) {
+            est <- poLCA(formula=formula, data=train, nclass=nclusters[k], ...)
+            logliks[k, fold] <- binarymultmixloglik(test, model=est)
+        }
+    }
+    cv.logliks <- rowMeans(logliks)
+    return(cv.logliks)
+}
+
+cv.for.past <- cv.poLCA(Paristan.2[,2:6], formula=formula(past), nclusters=1:6, verbose=FALSE)
+
+plot(1:6, cv.for.past, xlab="Number of clusters",
+     ylab="Cross-validated log-likelihood", type="b")
+
+# Decide to move forward with 2 clusters; the improvements in log-likelihood begin to diminish after this point
+# two clusters seems easier to understand as we have no theoretical grounding for 3 or more clusters
+past.final <- poLCA(cbind(postsocialist, intl.stds, socialist, monarchy, feudal) ~ 1, data=Paristan.2,
+                  nclass=2, verbose=FALSE)
+
+# Add the estimated cluster values to the Paristan.2 dataframe
+
+Paristan.2$atpCluster2prob <- past.final$posterior[,2]
+
+# report the conditional distributions of the observables for each cluster and the cluster proportions
+# take code from solutions for HW 9
+prob.matrix <- sapply(past.final$probs, function(mat) { mat[,2] } )
+prob.matrix <- cbind(prob.matrix, class=past.final$P)
+kable(prob.matrix)
+
+#################################################################333
+
+
+# report 95% CIs for stuff
+# All code in this chunk from chapter 6
+
+# Generate random values of a statistic by repeatedly running a simulator
+# Inputs: function to calculate the statistic (statistic)
+  # function to run the simulation (simulator)
+  # number of replicates (B)
+# Output: array of bootstrapped values of the statistic, with B columns
+  # To work more nicely with other functions, a vector is converted to an
+  # array of dimensions 1*B
+rboot <- function(statistic, simulator, B) {
+  tboots <- replicate(B, statistic(simulator()))
+  if(is.null(dim(tboots))) {
+      tboots <- array(tboots, dim=c(1, B))
+  }
+  return(tboots)
+}
+
+# Summarize the sampling distribution of a statistic, obtained by repeatedly
+  # running a simultor
+# Inputs: array of bootstrapped statistics values (tboots)
+  # function that summarizes the distribution (summarizer)
+  # optional additional arguments to summarizer (...)
+# Output: vector giving a summary of the statistic
+# Presumes: tboots is an array with one column per simulation
+  # each row of tboots is a separate component of the statistic
+  # applying the summarizer to each row separately makes sense
+bootstrap <- function(tboots, summarizer, ...) {
+  summaries <- apply(tboots, 1, summarizer, ...)
+  # using apply() like this has interchanged rows and columns
+    # because each chunk processed by apply() results in a new column, but
+    # here those chunks are the rows of tboots
+  # therefore use transpose to restore original orientation
+  return(t(summaries))
+}
+
+# Find equal-tail interval with specified probability
+# Inputs: vector of values to sort (x)
+  # total tail probability (alpha)
+# Output: length-two vector, giving interval of probability 1-alpha, with
+  # probability alpha/2 in each tail
+equitails <- function(x, alpha) {
+  lower <- quantile(x, alpha/2)
+  upper <- quantile(x, 1-alpha/2)
+  return(c(lower, upper))
+}
+
+# Calculate (basic or pivotal) bootstrap confidence interval
+# Inputs: function to calculate the statistic (statistic)
+  # function to run the simulation (simulator)
+  # optional array of bootstrapped values (tboots)
+    # if this is not NULL, over-rides the statistic & simulator arguments
+  # number of replicates (B)
+  # observed value of statistic (t.hat)
+  # confidence level (level)
+# Outputs: two-column array with lower and upper confidence limits
+bootstrap.ci <- function(statistic=NULL, simulator=NULL, tboots=NULL,
+                         B=if(!is.null(tboots)) { ncol(tboots) },
+                         t.hat, level) {
+  # draw the bootstrap values, if not already provided
+  if (is.null(tboots)) {
+    # panic if we're not given an array of simulated values _and_ also lack
+    # the means to calculate it for ourselves
+    stopifnot(!is.null(statistic))
+    stopifnot(!is.null(simulator))
+    stopifnot(!is.null(B))
+    tboots <- rboot(statistic, simulator, B)
+  }
+  # easier to work with error probability than confidence level
+  alpha <- 1-level
+  # Calculate probability intervals for each coordinate
+  intervals <- bootstrap(tboots, summarizer=equitails, alpha=alpha)
+  # Re-center the intervals around the observed values
+  upper <- t.hat + (t.hat - intervals[,1])
+  lower <- t.hat + (t.hat - intervals[,2])
+  # calculate CIs, centered on observed value plus bootstrap fluctuations
+    # around it
+  CIs <- cbind(lower=lower, upper=upper)
+  return(CIs)
+}
+
+# Resample a vector
+  # That is, treat a sample as though it were a whole population, and draw
+  # from it by sampling-with-replacement until we have a simulated data set
+  # as big as the original
+  # Equivalently, do IID draws from the empirical distribution
+# Inputs: vector to resample (x)
+# Outputs: vector of resampled values
+resample <- function(x) { sample(x,size=length(x),replace=TRUE) }
+
+# Resample whole rows from a data frame
+  # That is, treat the rows as a population, and sample them with replacement
+  # until we have a new data frame the same size as the original
+  # Equivalently, draw IIDly from the joint empirical distribution over all
+  # variables/columns
+# Inputs: data frame to resample (data)
+# Outputs: new data frame
+resample.data.frame <- function(data) {
+  # Resample the row indices
+  sample.rows <- resample(1:nrow(data))
+  # Return a new data frame with those rows in that order
+  return(data[sample.rows,])
+}
+
+
+```
+
+
+The one wrinkle here is that we have to beware of the label-switching problem.
+To combat this, we'll use the `poLCA.reorder` function provided in the package,
+to swap the class labels around so that the less common class is always
+class 1.  Also,
+the estimator function will be "primed" with the estimate we
+got from the full data, which should inhibit it switching the class labels.
+(An alternative would be to use the `poLCA.reorder` function provided in the
+package, to swap the class labels so that, say, the less common class is always
+class 1.)  I need to (temporarily) flatten the parameters down to a single
+vector, because the bootstrap confidence interval function isn't built to work
+with higher-dimensional arrays.
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Fit a two-class LCA model and return a _vector_ of parameters
+# Inputs: data frame (data)
+  # two-class LCA model to use as reference (ref.model)
+# Output: vector of all parameters for LCA model
+# Presumes: all observables are binary (so we only need the class-conditional
+  # probability of _one_ category)
+est.k2.past <- function(data, ref.model=past.final) {
+    # Estimate the two-class model
+    fit <- poLCA(formula=formula(ref.model), data=data, nclass=2,
+                 probs.start=ref.model$probs, verbose=FALSE)
+    # Handle label-switching by always making class 1 the less common one
+    fit.reordered <- poLCA.reorder(fit$probs, order(fit$P, decreasing=FALSE))
+    # Re-run estimation with this ordering
+      # Note default is nrep=1, so this is going to re-starting the
+      # optimization from the best point we found, and so should make only
+      # negligible changes
+    fit <- poLCA(formula=formula(ref.model), data=data, nclass=2,
+                 probs.start=fit$probs, verbose=FALSE)
+
+    # Treat this the way we did the original estimate:
+    # Extract the matrix of class-conditional probabilities for the
+    # observables
+    prob.matrix <- sapply(fit$probs, function(mat) { mat[,2] } )
+    # Tack on the probability of each class
+    prob.matrix <- cbind(prob.matrix, fit$P)
+    # Flatten to a vector
+    return(as.vector(prob.matrix))
+}
+
+# run a check - want it to match
+rbind(est.k2.past(Paristan.2, past.final), as.vector(prob.matrix))
+
+# run a check - perterb shouldn't disturb
+rbind(est.k2.past(Paristan.2[-(1:10),], past.final), as.vector(prob.matrix))
+
+# and bootstrap
+k2.boots.atp <- rboot(statistic=est.k2.past,
+                  simulator=function() { resample.data.frame(Paristan.2) },
+                  B=2)
+
+
+k2.cis.atp <- bootstrap.ci(tboots=k2.boots.atp, t.hat=est.k2.past(Paristan.2), level=6/7)
+
+# Re-convert to a pair of arrays
+k2.atp.cis.lower <- matrix(k2.cis.atp[,"lower"], nrow=2)
+k2.atp.cis.upper <- matrix(k2.cis.atp[,"upper"], nrow=2)
+
+
+# plot the parameters
+plot(1:ncol(prob.matrix), prob.matrix[1,], type="b", ylab="probability", ylim=c(0,1), xaxt="n",
+     xlab="")
+points(1:ncol(prob.matrix), prob.matrix[2,], type="b", col="blue")
+axis(side=1, at=1:ncol(prob.matrix), labels=c(colnames(Paristan.2)[2:6], "Class prob."),
+     las=2, cex.axis=0.5)
+segments(x0 = 1:ncol(prob.matrix), y0 = k2.atp.cis.lower[1,],
+         x1 = 1:ncol(prob.matrix), y1 = k2.atp.cis.upper[1,],
+         col="black")
+segments(x0 = 1:ncol(prob.matrix), y0 = k2.atp.cis.lower[2,],
+         x1 = 1:ncol(prob.matrix), y1 = k2.atp.cis.upper[2,],
+         col="blue")
+
+
+# to get rid of negative values
+arcsineTrans <- function(p) { asin(sqrt(p)) }
+arcsineTransInv <- function(q) { sin(q)^2 }
+
+k2.cis.atp.2 <- arcsineTransInv(bootstrap.ci(tboots=arcsineTrans(k2.boots.atp),
+                             t.hat=arcsineTrans(est.k2.past(Paristan.2)),
+                             level=6/7))
+
+k2.cis.atp.2.lower <- matrix(k2.cis.atp.2[,"lower"], nrow=2)
+k2.cis.atp.2.upper <- matrix(k2.cis.atp.2[,"upper"], nrow=2)
+
+plot(1:ncol(prob.matrix), prob.matrix[1,], type="b", ylab="probability", ylim=c(0,1), xaxt="n",
+     xlab="")
+points(1:ncol(prob.matrix), prob.matrix[2,], type="b", col="blue")
+axis(side=1, at=1:ncol(prob.matrix), labels=c(colnames(Paristan.2)[2:6], "Class prob."),
+     las=2, cex.axis=0.5)
+segments(x0 = 1:ncol(prob.matrix), y0 = k2.cis.atp.2.lower[1,],
+         x1 = 1:ncol(prob.matrix), y1 = k2.cis.atp.2.upper[1,],
+         col="black")
+segments(x0 = 1:ncol(prob.matrix), y0 = k2.cis.atp.2.lower[2,],
+         x1 = 1:ncol(prob.matrix), y1 = k2.cis.atp.2.upper[2,],
+         col="blue")
+
+
+```
+
+# 2. Mixture Model - General Political values
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+
+# Develop a mixture model for the "general political values" variables
+# political values variables include: freedom.oppression, personal.dignity, selfdetermination, and national.dignity
+political <- poLCA(cbind(freedom.oppression, personal.dignity, selfdetermination, national.dignity) ~ 1, data=Paristan.2,
+                  nclass=4, verbose=FALSE)
+
+# perfrom CV to pick the correct amount of clusters
+cv.for.political <- cv.poLCA(Paristan.2[,7:10], formula=formula(political), nclusters=1:6, verbose=FALSE)
+
+plot(1:6, cv.for.political, xlab="Number of clusters",
+     ylab="Cross-validated log-likelihood", type="b")
+
+# Decide to move forward with 2 clusters as the improvements in log-likelihood begin to diminish after this point
+political.final <- poLCA(cbind(freedom.oppression, personal.dignity, selfdetermination, national.dignity) ~ 1, 
+                         data=Paristan.2, nclass=2, verbose=FALSE)
+
+# Add the estimated cluster probabilites to the Paristan.2 data for later consideration
+Paristan.2$gpvCluster2prob <- political.final$posterior[,2]
+
+
+# report the conditional distributions of the observables for each cluster and the cluster proportions
+# take code from solutions for HW 9
+pol.prob.matrix <- sapply(political.final$probs, function(mat) { mat[,2] } )
+pol.prob.matrix <- cbind(pol.prob.matrix, class=political.final$P)
+kable(pol.prob.matrix)
+
+# perform bootstrapping for the 95% CI for the parameters
+est.k2.prob <- function(data, ref.model=political.final) {
+    # Estimate the two-class model
+    fit <- poLCA(formula=formula(ref.model), data=data, nclass=2,
+                 probs.start=ref.model$probs, verbose=FALSE)
+    # Handle label-switching by always making class 1 the less common one
+    fit.reordered <- poLCA.reorder(fit$probs, order(fit$P, decreasing=FALSE))
+    # Re-run estimation with this ordering
+      # Note default is nrep=1, so this is going to re-starting the
+      # optimization from the best point we found, and so should make only
+      # negligible changes
+    fit <- poLCA(formula=formula(ref.model), data=data, nclass=2,
+                 probs.start=fit$probs, verbose=FALSE)
+
+    # Treat this the way we did the original estimate:
+    # Extract the matrix of class-conditional probabilities for the
+    # observables
+    prob.matrix <- sapply(fit$probs, function(mat) { mat[,2] } )
+    # Tack on the probability of each class
+    prob.matrix <- cbind(prob.matrix, fit$P)
+    # Flatten to a vector
+    return(as.vector(prob.matrix))
+}
+
+
+# run a check - want it to match
+rbind(est.k2.prob(Paristan.2, political.final), as.vector(pol.prob.matrix))
+
+# run a check - perterb shouldn't disturb
+rbind(est.k2.prob(Paristan.2[-(1:10),], political.final), as.vector(pol.prob.matrix))
+
+# and bootstrap
+k2.prob.boots <- rboot(statistic=est.k2.prob,
+                  simulator=function() { resample.data.frame(Paristan.2) },
+                  B=2)
+
+
+
+# to get rid of negative values
+k2.prob.cis <- arcsineTransInv(bootstrap.ci(tboots=arcsineTrans(k2.prob.boots),
+                             t.hat=arcsineTrans(est.k2.prob(Paristan.2)),
+                             level=6/7))
+
+# Re-convert to a pair of arrays
+k2.cis.prob.lower <- matrix(k2.prob.cis[,"lower"], nrow=2)
+k2.cis.prob.upper <- matrix(k2.prob.cis[,"upper"], nrow=2)
+
+
+
+plot(1:ncol(pol.prob.matrix), pol.prob.matrix[1,], type="b", ylab="probability", ylim=c(0,1), xaxt="n",
+     xlab="")
+points(1:ncol(pol.prob.matrix), pol.prob.matrix[2,], type="b", col="blue")
+axis(side=1, at=1:ncol(pol.prob.matrix), labels=c(colnames(Paristan.2)[7:10], "Class prob."),
+     las=2, cex.axis=0.5)
+segments(x0 = 1:ncol(pol.prob.matrix), y0 = k2.cis.prob.lower[1,],
+         x1 = 1:ncol(pol.prob.matrix), y1 = k2.cis.prob.upper[1,],
+         col="black")
+segments(x0 = 1:ncol(pol.prob.matrix), y0 = k2.cis.prob.lower[2,],
+         x1 = 1:ncol(pol.prob.matrix), y1 = k2.cis.prob.upper[2,],
+         col="blue")
+
+
+```
+
+
+# 3. Fit a mixture model fo "human rights"
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+
+# Develop a mixture model for the "human rights" variables
+# human rights variables include: hr.personal.dignity, hr.equality, hr.political.freedom, hr.participation, hr.econ.freedom
+# hr.socioeconomics, hr.selfdetermination, hr.natl.respect, hr.violated, hr.support, hr.democracy, hr.mentioned
+human <- poLCA(cbind(hr.personal.dignity, hr.equality, hr.political.freedom, hr.participation,
+                     hr.econ.freedom, hr.socioeconomics, hr.selfdetermination, hr.natl.respect,
+                     hr.violated, hr.support, hr.democracy, hr.mentioned) ~ 1, data=Paristan.2,
+                    nclass=4, verbose=FALSE)
+
+# perfrom CV to pick the correct amount of clusters
+cv.for.human <- cv.poLCA(Paristan.2[,11:22], formula=formula(human), nclusters=1:7, verbose=FALSE)
+
+plot(1:7, cv.for.human, xlab="Number of clusters",
+     ylab="Cross-validated log-likelihood", type="b")
+
+# Decide to move forward with 2 clusters as the improvements in log-likelihood begin to diminish after this point
+human.final <- poLCA(cbind(hr.personal.dignity, hr.equality, hr.political.freedom, hr.participation,
+                     hr.econ.freedom, hr.socioeconomics, hr.selfdetermination, hr.natl.respect,
+                     hr.violated, hr.support, hr.democracy, hr.mentioned) ~ 1, data=Paristan.2,
+                    nclass=2, verbose=FALSE)
+
+# add the estimated cluster1 probabilities for future consideration
+# add 1 since we don't want 0z for the GAM
+Paristan.2$hrCluster2prob <- human.final$posterior[,2]
+
+
+# report the conditional distributions of the observables for each cluster and the cluster proportions
+# take code from solutions for HW 9
+hu.prob.matrix <- sapply(human.final$probs, function(mat) { mat[,2] } )
+hu.prob.matrix <- cbind(hu.prob.matrix, class=human.final$P)
+kable(hu.prob.matrix)
+
+# perform bootstrapping for the 95% CI for the parameters
+
+# Fit a two-class LCA model and return a _vector_ of parameters
+# Inputs: data frame (data)
+  # two-class LCA model to use as reference (ref.model)
+# Output: vector of all parameters for LCA model
+# Presumes: all observables are binary (so we only need the class-conditional
+  # probability of _one_ category)
+est.k2.hu <- function(data, ref.model=human.final) {
+    # Estimate the two-class model
+    fit <- poLCA(formula=formula(ref.model), data=data, nclass=2,
+                 probs.start=ref.model$probs, verbose=FALSE)
+    # Handle label-switching by always making class 1 the less common one
+    fit.reordered <- poLCA.reorder(fit$probs, order(fit$P, decreasing=FALSE))
+    # Re-run estimation with this ordering
+      # Note default is nrep=1, so this is going to re-starting the
+      # optimization from the best point we found, and so should make only
+      # negligible changes
+    fit <- poLCA(formula=formula(ref.model), data=data, nclass=2,
+                 probs.start=fit$probs, verbose=FALSE)
+
+    # Treat this the way we did the original estimate:
+    # Extract the matrix of class-conditional probabilities for the
+    # observables
+    prob.matrix <- sapply(fit$probs, function(mat) { mat[,2] } )
+    # Tack on the probability of each class
+    prob.matrix <- cbind(prob.matrix, fit$P)
+    # Flatten to a vector
+    return(as.vector(prob.matrix))
+}
+
+
+# run a check - want it to match
+rbind(est.k2.hu(Paristan.2, human.final), as.vector(hu.prob.matrix))
+
+# run a check - perterb shouldn't disturb
+rbind(est.k2.hu(Paristan.2[-(1:10),], human.final), as.vector(hu.prob.matrix))
+
+# and bootstrap
+k2.hu.boots <- rboot(statistic=est.k2.hu,
+                  simulator=function() { resample.data.frame(Paristan.2) },
+                  B=2)
+
+
+
+# to get rid of negative values
+k2.hu.cis <- arcsineTransInv(bootstrap.ci(tboots=arcsineTrans(k2.hu.boots),
+                             t.hat=arcsineTrans(est.k2.hu(Paristan.2)),
+                             level=6/7))
+
+# Re-convert to a pair of arrays
+k2.hu.cis.lower <- matrix(k2.hu.cis[,"lower"], nrow=2)
+k2.hu.cis.upper <- matrix(k2.hu.cis[,"upper"], nrow=2)
+
+
+
+plot(1:ncol(hu.prob.matrix), hu.prob.matrix[1,], type="b", ylab="probability", ylim=c(0,1), xaxt="n",
+     xlab="")
+points(1:ncol(hu.prob.matrix), hu.prob.matrix[2,], type="b", col="blue")
+axis(side=1, at=1:ncol(hu.prob.matrix), labels=c(colnames(Paristan.2)[11:22], "Class prob."),
+     las=2, cex.axis=0.5)
+segments(x0 = 1:ncol(hu.prob.matrix), y0 = k2.hu.cis.lower[1,],
+         x1 = 1:ncol(hu.prob.matrix), y1 = k2.hu.cis.upper[1,],
+         col="black")
+segments(x0 = 1:ncol(hu.prob.matrix), y0 = k2.hu.cis.lower[2,],
+         x1 = 1:ncol(hu.prob.matrix), y1 = k2.hu.cis.upper[2,],
+         col="blue")
+
+
+```
+
+
+# 4. Consider the conditional distributions
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4.a. Explore the extent to which the demographic variables can predict membership in the clusters estimated for problem 2
+
+# Check to see if there are relevenent NAs to remove for the demographic variables
+# Recall that 4 also represents an NA in the ethnicity variable
+demo.4 <- nrow(Paristan.2[Paristan.2[,29] == 4 , ])
+demo.4
+
+# Regress "General Political Values" cluster 1 on demographic variables
+# Demographic variables: location, gender, residence, age, education, occupation, ethnicity
+# Factor variables: location, gender, residence, occupation, ethniciy
+
+
+# Perform linear regression on the estimated cluster probabitlies
+dem.reg <- lm(gpvCluster2prob ~ factor(location) + factor(gender) + factor(residence) + age + education + factor(occupation) + factor (ethnicity),
+            data = Paristan.2)
+
+# Use the F-statistic to consider the predictive power of the model
+dem.F <- summary(dem.reg)$fstatistic
+p <- pf(dem.F[1],dem.F[2],dem.F[3],lower.tail=F)
+dem.F <- c(dem.F, p)
+dem.F <- dem.F[-2]
+dem.F <- dem.F[-2]
+
+
+
+# create a fitted versus predict plot like in lecture 10
+# first use the predlims function
+predlims <- function(preds, sigma) {
+  prediction.sd <- sqrt(preds$se.fit^2 + sigma^2)
+ upper <- preds$fit + 2 * prediction.sd
+  lower <- preds$fit - 2 * prediction.sd
+ lims <- cbind(lower = lower, upper = upper)
+ return(lims)
+ }
+
+pred.dem <- predict(dem.reg, se.fit = TRUE)
+predlims.dem <- predlims(pred.dem, sigma = summary(dem.reg)$sigma)
+
+
+plot(Paristan.2$gpvCluster2prob, dem.reg$fit, type = "n", 
+    xlab = "Estimated Posterior Cluster Probs",
+   ylab = "Predicted Posterior Cluster Probs", 
+    main = "Demographic Predictive Power", 
+    ylim = c(0, (max(predlims.dem))),
+    xlim = c(0, (max(predlims.dem))))
+segments(Paristan.2$gpvCluster2prob, predlims.dem[, "lower"], Paristan.2$gpvCluster2prob,
+      predlims.dem[, "upper"], col = "grey")
+
+points(Paristan.2$gpvCluster2prob, dem.reg$fit, pch = 16, cex = 0.5)
+#plot legend
+legend('topright', c("Baseline", "Standard Errors"), col = c("black", "grey"), lty=c(0,1), pch = c(16, 0))
+
+
+
+
+```
+
+We find that a relatively high (and significant) F-statisitic for this linear model suggests that demographic variables in this data set are somewhat predictive of the estimated posterior class probabilities of our mixture model for the "general political values." The F-statistic is $dem.F[1]$ with a p-value of $dem.F[2]$. 
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4.b. Explore whether estimated membership in the clusters for problems 1 and 3 are independent given the estimated cluster membership
+# from problem 2, and summarize your conslusions
+
+
+# I use the provided solutions for HW 10 problem 5 to explore these conditional probabilities
+
+# First, let's visualize the "conditional probs" using the visualize gams 
+# ATP cluster prob is independent of HR cluster prob, given GPV cluster prob
+
+vis.gam(gam(atpCluster2prob ~ te(hrCluster2prob, gpvCluster2prob), data=Paristan.2),
+        theta=45, ticktype="detailed")
+
+
+```
+
+In this plot, I smooth the "Attitudes Towards Past" Cluster 2 probabilities against both "General Political Values" and "Human Rights" cluster 2 probabilities.
+
+We also use a more formal test, the built-in significant test in the mgcv package:
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Use the built-in test on the MGCV package to look at conditional independencies
+
+summary(gam(atpCluster2prob ~ ti(gpvCluster2prob)+ti(hrCluster2prob, gpvCluster2prob)+ti(hrCluster2prob), data=Paristan.2))
+
+
+ci.test(x = Paristan.2$hrCluster2prob, y = Paristan.2$atpCluster2prob, z = Paristan.2$gpvCluster2prob) # high p-value suggests we can't reject the null, and the correlation might be 0 (i.e. they are independent given GPV clustering)
+
+# Try a linear model prediction
+# P(C1, C3 | C2) = P(C1|C2)*P(C3|C2) = P(C1|C3,C2)*P(C3|C2)
+
+# First calculate P(C1|C2) = P(ATP cluster | GPV Cluster)
+PC1.C2 <- lm(atpCluster2prob ~ gpvCluster2prob, data = Paristan.2)
+
+# Next calculate P(C3|C2) = P(HR cluster | GPV Cluster)
+PC3.C2 <- lm(hrCluster2prob ~ gpvCluster2prob, data = Paristan.2)
+
+# Next calculate P(C1|C3,C2) = P(HR cluster | HR Cluster, GPV Cluster)
+PC1.C3C2 <- lm(atpCluster2prob ~ gpvCluster2prob + hrCluster2prob, data = Paristan.2)
+
+# If conditionally independent, P(C1|C2)*P(C3|C2) = P(C1|C3,C2)*P(C3|C2)
+Left <- fitted(PC1.C2)*fitted(PC3.C2)
+Right <- fitted(PC1.C3C2)*fitted(PC3.C2)
+cor(Left,Right)
+
+# It looks like cluster memberships for ATP are independent of "GPV" cluster memberships given HR memberships
+
+```
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4.c. Explore whether estimated membership in the clusters for problems 1 is conditionally indpendent of demographic variables
+# from problem 2, and summarize your conslusions
+
+# Try a linear model prediction
+# P(C1, C3 | C2) = P(C1|C2)*P(C3|C2) = P(C1|C3,C2)*P(C3|C2)
+
+
+# First calculate P(C1|C2) = P(ATP cluster | Demographic Variables)
+PC1.demo <- lm(atpCluster2prob ~ factor(location) + factor(gender) + factor(residence) + age + education + factor(occupation) + factor (ethnicity),
+            data = Paristan.2)
+# Next calculate P(C3|C2) = P(HR cluster | Demographic Variables)
+PC3.demo <- lm(hrCluster2prob ~ factor(location) + factor(gender) + factor(residence) + age + education + factor(occupation) + factor (ethnicity),
+            data = Paristan.2)
+
+# Next calculate P(C1|C3,C2) = P(HR cluster | HR Cluster, Demographic Variables)
+PC1.C3demo <- lm(atpCluster2prob ~ hrCluster2prob + factor(location) + factor(gender) + factor(residence) + age + education + factor(occupation) + factor (ethnicity), data = Paristan.2)
+
+# If conditionally independent, P(C1|C2)*P(C3|C2) = P(C1|C3,C2)*P(C3|C2)
+Left2 <- fitted(PC1.demo)*fitted(PC3.demo)
+Right2 <- fitted(PC1.C3demo)*fitted(PC3.demo)
+cor(Left2,Right2)
+
+
+
+
+
+```
+
+# Problem 5
+
+Regardless of my answers for problem 4, I am basing my answers for problem 5 on the researchers' theory, which I deduced from the last two bullet points of the "Scientific Conjectures." Furthermore, it is suggested by those two bullet points as well as Problems 4b and 4c that "Attitudes Towards Past" clustering should be independent of "Human Rights" clustering, given "General Political Values" clustering. Futhermore, it is suggested that "Attitudes Towards Past" clustering should be indpenendent of "Demographics" given "General Political Values" clustering. My answers for 5a and 5b are based on these suggestions being true.
+
+# 5.a.
+
+The figure below is a graphical model representing the researchers' theory, which I deduced from the last two bullet points of "Scientific Conjectures."
+
+![A remote image](finalfigure.png)
+
+This directed acyclic graph does imply that the estimated cluster memberships used in problem 4 should follow the same conditional independence relations as the actual latent variables. This model means that other variables not included in the graph, latent variables, are independent of the rest of the model and only are represented in this current model as noise. 
+
+
+# 5.b. 
+
+The graphical model for the researchers' theory is not the noly graphical model that predicts the pattern of conditional independences suggested to occur between the observed variables. The following three graphical models each demonstrate the following patterns of conditional independences among the observed and estimated (but not latent) variables:
+
+\
+
+`*` "Attitudes Towards Past" clustering should be independent of "Human Rights" clustering, given "General Political Values" clustering. 
+
+`*` "Attitudes Towards Past" clustering should be indpenendent of "Demographics" given "General Political Values" clustering.
+
+
+![A remote image](finalfigureB.png)
+
+\
+
+![A remote image](finalfigureC.png)
+
+\
+
+![A remote image](finalfigureD.png)
+
+
+
+

@@ -1,0 +1,54 @@
+---
+title: "Homework 6"
+author: "Nichole Hanus"
+date: "Monday, February 22, 2016"
+output: pdf_document
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Set the directory
+setwd("~/2. Courses/36-608 Advanced Data Analysis/HW 6")
+
+# Install required libraries and packages
+install.packages("formula.tools", repos = "http://cran.us.r-project.org")
+library(formula.tools) 
+
+# for pretty tables
+install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr) 
+
+# Read MSA data
+civil <- read.csv("~/2. Courses/36-608 Advanced Data Analysis/HW 6/ch.csv", header=TRUE)
+
+```
+
+## 1. Fit logistic regression
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+logr <- glm((start > 0) ~ exports + I(exports^2) + schooling + growth + 
+              peace + concentration + lnpop + fractionalization + 
+              dominance, data = civil, family = "binomial")
+
+kable(coefficients(summary(logr)), digits = 3)
+
+```
+
+R reports the following coefficients are significant at the 5% level:
+Exports, Exports^2, Schooling, Growth, Peace, Concentration, lnpop, and Fractionalization.
+
+## 2. Interpretation
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# model's predicted probability for a civil war in India in the period beginning 1975
+India.1975 <- predict.glm(logr, newdata = civil[500,])
+prob2a1 <- exp(India.1975)/(1+exp(India.1975))
+prob2a1
+
+
+```
+
+
+

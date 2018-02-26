@@ -1,0 +1,511 @@
+---
+title: "Homework 9 R2"
+author: "Nichole Hanus"
+date: "Thursday, March 31, 2016"
+output: pdf_document
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Set the directory
+setwd("~/2. Courses/36-608 Advanced Data Analysis/HW 9")
+
+# Install required libraries and packages
+install.packages("formula.tools", repos = "http://cran.us.r-project.org")
+library(formula.tools) 
+
+# for pretty tables
+install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr) 
+
+# for mixture models involving latent class models
+install.packages("poLCA",dependencies=TRUE, repos = "http://cran.us.r-project.org")
+library(poLCA) 
+
+# for kernel regression
+install.packages("np",dependencies=TRUE, repos = "http://cran.us.r-project.org")
+library(np) 
+
+# Read cheating data
+data(cheating)
+
+```
+
+# 1. Load the data
+## 1.a. What are the correlations between the four forms of cheating?
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Calculate correlations and present in a table
+# Look at the four types of cheating: 1. Lie on Exam (LE), Lie on Paper (LP), Fraud (F), and Copy (C)
+LE.LE <- round(cor(cheating$LIEEXAM, cheating$LIEEXAM), digits = 2)
+LE.LP <- round(cor(cheating$LIEEXAM, cheating$LIEPAPER), digits = 2)
+LE.F  <- round(cor(cheating$LIEEXAM, cheating$FRAUD), digits = 2)
+LE.C  <- round(cor(cheating$LIEEXAM, cheating$COPYEXAM), digits = 2)
+LP.LP <- round(cor(cheating$LIEPAPER, cheating$LIEPAPER), digits = 2)
+LP.F  <- round(cor(cheating$LIEPAPER, cheating$FRAUD), digits = 2)
+LP.C  <- round(cor(cheating$LIEPAPER, cheating$COPYEXAM), digits = 2)
+F.F   <- round(cor(cheating$FRAUD, cheating$FRAUD), digits = 2)
+F.C   <- round(cor(cheating$FRAUD, cheating$COPYEXAM), digits = 2)
+C.C   <- round(cor(cheating$COPYEXAM, cheating$COPYEXAM), digits = 2)
+
+# develop table
+LE.corr <- as.vector(c(LE.LE,LE.LP, LE.F,LE.C))
+LP.corr <- as.vector(c("-", LP.LP,LP.F,LP.C))
+F.corr <- as.vector(c("-", "-",F.F,F.C))
+C.corr <- as.vector(c("-", "-", "-",C.C))
+
+corr.table <- as.data.frame(cbind(LE.corr,LP.corr,F.corr,C.corr))
+colnames(corr.table) <- c("LieExam","LiePaper", "Fraud", "Copy")
+rownames(corr.table) <- c("LieExam","LiePaper", "Fraud", "Copy")
+
+# print table of correlations
+kable(corr.table)
+
+```
+
+This correlation table is symmetric. We find there to be a high (44%) correlation rate between lying about a paper (LiePaper) and lying about an exam (LieExam). The second highest correlation is between Fraud and Lying on an Exam. 
+
+
+## 1.b. Cheating Frequencies
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 1.b. look at cheating frequency
+# add a column to database which sums over the cheating variable columns
+cheating$total <- (cheating$LIEEXAM + cheating$LIEPAPER + 
+                     cheating$FRAUD + cheating$COPYEXAM)/4
+
+# add a column of ones to make calculating fractions easier
+cheating$ones <- 1
+
+# what fraction of students have cheated at least once?
+once <- sum(cheating$ones[cheating$total > 1])/nrow(cheating)
+
+# what fraction of students have engaged in multiple forms?
+multi <- (sum(cheating$ones[cheating$total > 1.25])/nrow(cheating))/once
+  
+```
+
+From this group of students, `r round(once, digits = 2)*100`%  have cheated at least once and `r round(multi, digits = 2)*100`% have cheated multiple times.
+
+## 1.c. More Cheating Frequencies :(
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 1.c. 
+# what fraction of students have lied to get out of an exam?
+frac.LE <- sum(cheating$ones[cheating$LIEEXAM > 1])/nrow(cheating)
+
+# what fraction of students have bought a term paper or snuck a look at an exam
+frac.F <- sum(cheating$ones[cheating$FRAUD > 1 ])/nrow(cheating)
+
+# what fraction of students have engaged in multiple forms?
+frac.LEandF <- (sum(cheating$ones[cheating$LIEEXAM > 1 & cheating$FRAUD > 1])
+                /nrow(cheating))/frac.LE
+  
+```
+
+From this group of students, `r round(frac.LE, digits = 2)*100`%  have lied to get out of an exam and `r round(frac.F, digits = 2)*100`% have have bought a term paper or snuck a look at an exam before taking it. Finally, `r round(frac.LEandF, digits = 2)*100`% who have lied to get out of an exam have committed fraud.
+
+
+# 2. Fit a latent class model with two classes or clusters
+## 2.a. Probabilities of Cheating and Classes
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2. Fit a latent class model with two classes or clusters
+cheating.LC <- poLCA(cbind(LIEEXAM, LIEPAPER, FRAUD, COPYEXAM)~1, data = cheating, nclass = 2)
+
+```
+
+The following table represents the probabilities of each form of cheating in each class. Overall, we see that the probability of cheating is much greater in Class 1 than in Class 2. In Class 1, if students cheat, they are most likely to lie about turning in a paper on time; in Class 2, if students cheat, they are most likely to copy answers or obtain an old exam.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# first output the probs into dataframes so that we can pull data and make a nice table
+prob.LE.class1 <- cheating.LC$probs$LIEEXAM[1,2]
+prob.LP.class1 <- cheating.LC$probs$LIEPAPER[1,2]
+prob.F.class1  <- cheating.LC$probs$FRAUD[1,2]
+prob.C.class1  <- cheating.LC$probs$COPY[1,2]
+
+prob.LE.class2 <- cheating.LC$probs$LIEEXAM[2,2]
+prob.LP.class2 <- cheating.LC$probs$LIEPAPER[2,2]
+prob.F.class2  <- cheating.LC$probs$FRAUD[2,2]
+prob.C.class2  <- cheating.LC$probs$COPY[2,2]
+
+# make the vectors for the table; one vector for each class
+class1.probs <- c(prob.LE.class1,prob.LP.class1, prob.F.class1,prob.C.class1)
+class2.probs <- c(prob.LE.class2,prob.LP.class2, prob.F.class2,prob.C.class2)
+
+# combine class vectors to make table
+probs.table <- as.data.frame(cbind(class1.probs, class2.probs))
+
+# add row and column names
+rownames(probs.table) <- c("P(LieExam)", "P(LiePaper)", "P(Fraud)", "P(Copy)")
+colnames(probs.table) <- c("Class1", "Class2")
+
+# make the dataframe a pretty table
+kable(probs.table, digits = 2)
+
+```
+
+
+
+Next, we consider the mixing probabilities of the classes (i.e. the posterior probability).
+
+```{r, echo=FALSE,warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# What is the probability of each class?
+# need to sum the predicted class values
+class2.prob <- cheating.LC$P[2]
+class1.prob <- cheating.LC$P[1]
+
+# put into table
+class.prob <- as.data.frame(cbind(class1.prob, class2.prob))
+colnames(class.prob) <- c("Class 1", "Class 2")
+rownames(class.prob) <- "Mixing Probability"
+kable(class.prob, digits = 2)
+
+```
+
+##2.b. Cheating behavior in each cluster
+
+The next table details the probability that a member of a given cluster has engaged in at least one form of cheating and that a member of the cluster who has enganged in at least one sort of cheating has enganged in multiple forms of cheating. 
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2.b. For each cluster, find the prob that a member of the cluster has enganged in at least one form of cheating
+
+# probability that a member of each cluster cheated in at least one way, Class 1
+probCheat.Class1 <- 1-(cheating.LC$probs$LIEEXAM[1,1]*cheating.LC$probs$LIEPAPER[1,1]*cheating.LC$probs$FRAUD[1,1]*cheating.LC$probs$COPY[1,1])
+
+# probability that a member of each cluster cheated in at least one way, Class 2
+probCheat.Class2 <- 1-(cheating.LC$probs$LIEEXAM[2,1]*cheating.LC$probs$LIEPAPER[2,1]*cheating.LC$probs$FRAUD[2,1]*cheating.LC$probs$COPY[2,1])
+
+# multiple cheating, Class 1
+probMultiCheat.Class1 <- (1- ((cheating.LC$probs$LIEEXAM[1,1]*cheating.LC$probs$LIEPAPER[1,1]*cheating.LC$probs$FRAUD[1,1]*cheating.LC$probs$COPY[1,1])+
+                       (cheating.LC$probs$LIEEXAM[1,2]*cheating.LC$probs$LIEPAPER[1,1]*cheating.LC$probs$FRAUD[1,1]*cheating.LC$probs$COPY[1,1]) +
+                        (cheating.LC$probs$LIEEXAM[1,1]*cheating.LC$probs$LIEPAPER[1,2]*cheating.LC$probs$FRAUD[1,1]*cheating.LC$probs$COPY[1,1]) +
+                         (cheating.LC$probs$LIEEXAM[1,1]*cheating.LC$probs$LIEPAPER[1,1]*cheating.LC$probs$FRAUD[1,2]*cheating.LC$probs$COPY[1,1]) +
+                         (cheating.LC$probs$LIEEXAM[1,1]*cheating.LC$probs$LIEPAPER[1,1]*cheating.LC$probs$FRAUD[1,1]*cheating.LC$probs$COPY[1,2])))/(probCheat.Class1)
+
+
+# multiple cheating, Class 2
+probMultiCheat.Class2 <- (1- ((cheating.LC$probs$LIEEXAM[2,1]*cheating.LC$probs$LIEPAPER[2,1]*cheating.LC$probs$FRAUD[2,1]*cheating.LC$probs$COPY[2,1])+
+                       (cheating.LC$probs$LIEEXAM[2,2]*cheating.LC$probs$LIEPAPER[2,1]*cheating.LC$probs$FRAUD[2,1]*cheating.LC$probs$COPY[2,1]) +
+                        (cheating.LC$probs$LIEEXAM[2,1]*cheating.LC$probs$LIEPAPER[2,2]*cheating.LC$probs$FRAUD[2,1]*cheating.LC$probs$COPY[2,1]) +
+                         (cheating.LC$probs$LIEEXAM[2,1]*cheating.LC$probs$LIEPAPER[2,1]*cheating.LC$probs$FRAUD[2,2]*cheating.LC$probs$COPY[2,1]) +
+                         (cheating.LC$probs$LIEEXAM[2,1]*cheating.LC$probs$LIEPAPER[2,1]*cheating.LC$probs$FRAUD[2,1]*cheating.LC$probs$COPY[2,2])))/(probCheat.Class2)
+  
+
+# Develop table for these probabilities
+Class1.probs <- as.vector(c(probCheat.Class1, probMultiCheat.Class1))
+Class2.probs <- as.vector(c(probCheat.Class2, probMultiCheat.Class2))
+Class.table <- as.data.frame(cbind(Class1.probs,Class2.probs))
+rownames(Class.table) <- c("Single Cheating","Multi. Cheating")
+colnames(Class.table) <- c("Class 1", "Class 2")
+
+# print table
+kable(Class.table, digits = 2)
+
+```
+
+##2.c. How do the two classes differ from each other?
+People in class 1 are very likely to cheat. People in class 2 are less likely to cheat than people in class 1. People who cheat in class 1 are very likely to cheat more than once.
+
+# 3. Conditioning
+## 3.a. What is the prob that a random student committed fraud?
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 3.a Prob that a random student committed fraud
+# calculate total probability of fraud
+total.F <- cheating.LC$probs$FRAUD[1,2]*cheating.LC$P[1] + 
+  cheating.LC$probs$FRAUD[2,2]*cheating.LC$P[2]
+
+```
+
+The total probability of fraud within the class is `r round(total.F, digits = 2)*100`%.
+
+
+## 3.b. Prob(Class1 | LieExam) and Prob(Class2 | LieExam) 
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 3.b Find Prob(class1 | lie) and Prob(class2 | lie)
+
+# first, determine the total probability of lieing to get out of an exam
+total.LE <- cheating.LC$probs$LIEEXAM[1,2]*cheating.LC$P[1]  + 
+  cheating.LC$probs$LIEEXAM[2,2]*cheating.LC$P[2]
+
+# Use Bayes rule to determine Prob(class1 | lie) and Prob(Class2 | lie)
+# Bayes Rule: Prob(class1 | lie) = [Prob(lie|class1)*Prob(class1)]/Prob(lie)
+ProbClass1.LE <- cheating.LC$probs$LIEEXAM[1,2]*cheating.LC$P[1]/total.LE
+ProbClass2.LE <- cheating.LC$probs$LIEEXAM[2,2]*cheating.LC$P[2]/total.LE
+
+```
+
+P(Class 1| LieExam) = `r round(ProbClass1.LE, digits =3)`
+
+
+P(Class 2| LieExam) = `r round(ProbClass2.LE, digits =3) `
+
+## 3.c. Prob(Fraud | LieExam)
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 3.c Find prob that a student who has lied to get out of an exam has also comitted fraud
+Prob.LEgivenF <- ((cheating.LC$probs$LIEEXAM[1,2]*cheating.LC$probs$FRAUD[1,2])*cheating.LC$P[1]
+                  +(cheating.LC$probs$LIEEXAM[2,2]*cheating.LC$probs$FRAUD[2,2])*cheating.LC$P[2])/total.LE
+
+```
+
+P(Fraud |LieExam) = `r round(Prob.LEgivenF, digits =3) `
+
+## 3.d. Independence
+
+These cheating probabilities are independent within each class. However, once we know that a student is in Class 1 (i.e. condition on Class 1), we know something more about whether or not they are likely to engage in any form of cheating. The probability of them cheating increases after we know that they are apart of Class 1.
+
+# 4. Bootstrapping at the 14.3% significance level
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 4. Use resampling of students to provide 85.7% confidence intervals for the parameters of the two-cluster model
+# Parameters: (1) Class-conditional response probabilities for each manifest variable and (2) the "mixing" proportions
+# Consider only the probability of CHEATING (probability of not cheating is simply 1 - P(cheating))
+
+# resampler function
+return.resampler <- function() {
+  n <- nrow(cheating)
+  resample.rows <- sample(1:n,size=n,replace=TRUE)
+  return(cheating[resample.rows,])
+}
+
+
+# estimator function
+est.lc <- function(data) {
+    lc.sim = poLCA(cbind(LIEEXAM, LIEPAPER, FRAUD, COPYEXAM)~1, data = data, nclass = 2)
+    conditional.probs    <- c(lc.sim$probs$LIEEXAM[1,2],lc.sim$probs$LIEEXAM[2,2],
+                             lc.sim$probs$LIEPAPER[1,2],lc.sim$probs$LIEPAPER[2,2],
+                             lc.sim$probs$FRAUD[1,2],lc.sim$probs$FRAUD[2,2],
+                             lc.sim$probs$COPYEXAM[1,2],lc.sim$probs$COPYEXAM[2,2])
+    mixing.prop.Class1  <- ifelse( lc.sim$P[1] > lc.sim$P[2], lc.sim$P[2], lc.sim$P[1])
+    parameters <- as.vector(c(conditional.probs,mixing.prop.Class1))
+    return(parameters)
+}
+
+
+# test stat
+TESTconditional.probs <- c(cheating.LC$probs$LIEEXAM[1,2],cheating.LC$probs$LIEEXAM[2,2],
+                             cheating.LC$probs$LIEPAPER[1,2],cheating.LC$probs$LIEPAPER[2,2],
+                             cheating.LC$probs$FRAUD[1,2],cheating.LC$probs$FRAUD[2,2],
+                             cheating.LC$probs$COPYEXAM[1,2],cheating.LC$probs$COPYEXAM[2,2])
+TESTmixing.prop.Class1    <- ifelse( cheating.LC$P[1] > cheating.LC$P[2], cheating.LC$P[2], cheating.LC$P[1])
+TESTparameters            <- as.vector(c(TESTconditional.probs,TESTmixing.prop.Class1))
+
+
+# develop CIs from resampled cases
+parameters.cis <- function(B, alpha, test = TESTparameters ){
+  cases.boots <- replicate(B, est.lc(return.resampler()))
+  cis.lower <- 2*test - apply(cases.boots, 1, 
+                                            quantile, probs = 1-alpha/2)
+  cis.upper <- 2*test - apply(cases.boots, 1, 
+                                            quantile, probs = alpha/2)
+  return(list(lower.ci=cis.lower,upper.ci=cis.upper))
+  }
+
+cheating.parameters.ci <- as.data.frame(parameters.cis(B=10, alpha = 0.143, 
+                                       test = TESTparameters))
+
+
+```
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# make a table of probabilities and CIs
+# only print the probabilities of CHEATING
+
+
+Class1.lower.CIs <- c(cheating.parameters.ci[1,1], cheating.parameters.ci[3,1],cheating.parameters.ci[5,1],cheating.parameters.ci[7,1])
+Class1.upper.CIs <- c(cheating.parameters.ci[1,2], cheating.parameters.ci[3,2],cheating.parameters.ci[5,2],cheating.parameters.ci[7,2])
+Class2.lower.CIs <- c(cheating.parameters.ci[2,1], cheating.parameters.ci[4,1],cheating.parameters.ci[6,1],cheating.parameters.ci[8,1])
+Class2.upper.CIs <- c(cheating.parameters.ci[2,2], cheating.parameters.ci[4,2],cheating.parameters.ci[6,2],cheating.parameters.ci[8,2])
+
+
+# combine class vectors to make table
+# First, make a table for Class 1
+probs.table1 <- as.data.frame(cbind(Class1.lower.CIs,class1.probs,Class1.upper.CIs))
+# add row and column names
+rownames(probs.table1) <- c("P(LieExam)", "P(LiePaper)", "P(Fraud)", "P(Copy)")
+colnames(probs.table1) <- c("Lower Prob", "Class1 Prob","Upper Prob")
+
+# make the dataframe a pretty table
+kable(probs.table1, digits = 2)
+
+# Make a table for Class 2
+probs.table2 <- as.data.frame(cbind(Class2.lower.CIs,class2.probs,Class2.upper.CIs))
+
+# add row and column names
+rownames(probs.table2) <- c("P(LieExam)", "P(LiePaper)", "P(Fraud)", "P(Copy)")
+colnames(probs.table2) <- c("Lower Prob", "Class2 Prob","Upper Prob")
+
+# make the dataframe a pretty table
+kable(probs.table2, digits = 2)
+
+
+# make a table for the mixing probability
+mix.table <- cbind(cheating.parameters.ci[9,1],cheating.LC$P[1], cheating.parameters.ci[9,2] )
+rownames(mix.table) <- "Mixing Probability"
+colnames(mix.table) <- c("Lower Prob", "Class 1 Mix Prob","Upper Prob")
+kable(mix.table, digits = 2)
+
+```
+
+The first table depicts the 85.7% confidence intervals for each of the probabilities within Class 1. P(LieExam) has the largest range of probabilities and at it's lower tail, the probability of lying about a paper or copying exceeds the probability of lying about an exam. In Class 2 we see much smaller probabilities of cheating across the board and very narrow confidence intervals. 
+
+#5. Density Estimates
+
+##5.a. Same bandwidth for each of the five density estimates?
+
+We use the cross-validated bandwidth for each level of GPA. There are varying numbers of observations for each GPA level, and the cross-validated BW can automatically adopt to the best for each subset of the data.
+
+##5.b. Plot the five estimated PDFs
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# For each level of the GPA variable, make a kernel density estimate for the probabilities of being in class 1
+# add the column of probabilities of being in class 1 to the dataframe
+
+cheating$class1prob <- cheating.LC$posterior[,1]
+
+# remove rows with NAs and put in new dataframe
+cheating.rmna <- na.omit(cheating)
+
+# create an empty plot
+plot(1, type="n", ylab="Density", 
+     xlab = "Prob. of Class1", 
+     xlim = c(0, 1.2),
+     ylim = c(0,40),
+     main = "PDF of Class1 Prob. for ea. GPA")
+
+# remove the multistart messages on output
+options(np.messages = FALSE)
+
+# line for GPA1
+cheating.sub1  <- subset(cheating.rmna, GPA == 1)
+lines(density(cheating.sub1$class1prob, bw = "ucv"), col = "blue", lwd = 2)
+
+# line for GPA2
+cheating.sub2  <- subset(cheating.rmna, GPA == 2)
+lines(density(cheating.sub2$class1prob, bw = "ucv"), col = "red", lwd = 2)
+
+# line for GPA3
+cheating.sub3  <- subset(cheating.rmna, GPA == 3)
+lines(density(cheating.sub3$class1prob, bw = "ucv"), col = "green", lwd = 2)
+
+# line for GPA4
+cheating.sub4  <- subset(cheating.rmna, GPA == 4)
+lines(density(cheating.sub4$class1prob, bw = "ucv"), col = "black", lwd = 2)
+
+# line for GPA5
+cheating.sub5  <- subset(cheating.rmna, GPA == 5)
+lines(density(cheating.sub5$class1prob, bw = "ucv"), col = "grey", lwd = 2)
+
+# add a legend
+legend('topright', c("GPA1","GPA2","GPA3","GPA4","GPA5"), col = c("blue","red","green","black","grey"), lty=1)
+
+```
+
+##5.c. How is GPA related to the probability of being in class 1?
+From the PDFs, we see that as GPA increases, the probability of being in Class 1 reduces. Recall that people in Class 1 are much more likely to cheat than people in Class 2. Therefore, we can infer from this graph that GPA is negatively correlated with probability of cheating (i.e. as GPA increases, the student is observed to be less likely to cheat).
+
+#6. Use five-fold cross-validation of the log-likelihood to pick the number of clusters
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+################################################
+### The following section is commented out   ###
+### because I did not have time to finish.   ###
+### I was hoping to get some partial credit. ###
+#################################################
+
+
+
+# try this for two clusters
+# put conditional probabilities a dataframe
+
+# class 1
+# create blank dataframe
+
+#Cond.Probs1 <- data.frame(matrix(ncol = 4, nrow = nrow(cheating.rmna)))
+#colnames(Cond.Probs) <- c("LIEEXAM","LIEPAPER","FRAUD","COPY")
+
+#for(i in ncol(Cond.Probs1)){
+ # for (j in nrow(Cond.Probs1)){
+  #  Cond.Probs1[j,i] <- ifelse(cheating.rmna[i,j] == 1 , as.data.frame(cheating.LC$probs[i])[1,1], as.data.frame(cheating.LC$probs[i])[1,2])
+  #}
+#}
+
+# add column to multiply total probability of each class with joint probability of all cheating events
+#Cond.Probs1$timesTotalProb <- apply(Cond.Probs1, MARGIN = 1, prod)*cheating.LC[1]
+
+
+# class 2
+# create blank dataframe
+
+#Cond.Probs2 <- data.frame(matrix(ncol = 4, nrow = nrow(cheating.rmna)))
+#colnames(Cond.Probs) <- c("LIEEXAM","LIEPAPER","FRAUD","COPY")
+
+#for(i in ncol(Cond.Probs2)){
+ # for (j in nrow(Cond.Probs2)){
+  #  Cond.Probs2[j,i] <- ifelse(cheating.rmna[i,j] == 1 , as.data.frame(cheating.LC$probs[i])[2,1], as.data.frame(cheating.LC$probs[i])[2,2])
+  #}
+#}
+
+# add column to multiply total probability of each class with joint probability of all cheating events
+#Cond.Probs2$timesTotalProb <- apply(Cond.Probs2, MARGIN = 1, prod)*cheating.LC[2]
+
+# take log of total probabilities
+#Totals <- log(Cond.Probs1$timesTotalProb + Cond.Probs1$timesTotalProb)
+#LogL <- sum(Totals)
+
+
+
+# after I determine how to generalize the likelihood (LogL) function for tests of multiple cluster lenghths,
+# I would plug into the k-fold CV function and look for the cluster value that returned the highest LogLiklihood
+
+
+## ----kfold-cv-for-poLCA------------------------------------------
+#cv.poLCA <- function(data, nfolds) {
+
+  #n <- nrow(data)
+
+  #fold.labels <- sample(rep(1:nfolds, length.out=n))
+  #logLikes <- matrix(NA, nrow=nfolds, ncol=length(clusters))
+  #colnames <- as.character(clusters)
+
+  #for (fold in 1:nfolds) {
+   # test.rows <- which(fold.labels == fold)
+    #train <- data[-test.rows,]
+   # test <- data[test.rows,]
+   # for (clust in 1:length(clusters)) {
+
+     # mixture <- 
+     # logLikes[fold,clust] <- loglike.binom(cheating[test],mixture=mixture)
+      # }
+    # }
+ # return(colMeans(logLikes))
+# }
+
+# cv.poLCA(data = cheating, nfolds = 5)
+
+
+```
+
+Please see R file for incomplete code (was attempting partial credit).
+
+
+
+

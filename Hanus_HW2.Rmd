@@ -1,0 +1,194 @@
+---
+title: "Homework 2"
+author: "Nichole Hanus"
+date: "Saturday, January 23, 2016"
+output: pdf_document
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Set the directory
+setwd("~/2. Courses/36-608 Advanced Data Analysis/HW 2")
+
+# Install required libraries and packages
+install.packages("formula.tools", repos = "http://cran.us.r-project.org")
+library(formula.tools) 
+
+
+# for pretty tables
+install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr) 
+
+# Might need to find new package for this kernal smoothing
+# for kernal smoothing curves
+install.packages("KernSmooth", repos = "http://cran.us.r-project.org")
+library(KernSmooth)
+
+# Read in data
+GDP <- read.csv("~/2. Courses/36-608 Advanced Data Analysis/HW 2/uv.csv", header=TRUE)
+
+```
+
+##1. Regress growth rate on under-evaluation index and log GDP
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 1. Linearly regress growth rate (Y) on UVI and Log GDP
+GR.fit1 <- lm(growth ~ underval + log(gdp), data = GDP)
+kable(coefficients(summary(GR.fit1)), digits = 4)
+
+
+```
+
+A log(gdp) coefficient of 0.0063 suggests there is a 0.00006 unit increase in economic growth rate given a 1% increase in GDP, while holding the under-valuation index constant. This suggests that growth rate increases at a much slower rate than GDP. This seems to discredit the idea that increasing GDP will lead to great gains in GDP (i.e. adopting new technologies), will not lead to a rapid growth rate.
+
+The coefficient for underval supports the idea that under-valuting a currency boosts economic growth, as mean growth rate increases by 0.0048 given a one-unit increase in the average under-evaluation index and holding GDP constant.
+
+## 2. Repeat regression; add country and year
+
+###2.a. Coefficients for log GDP and undervaluation
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2. Repeat regression and add country and year
+GR.fit2 <- lm(growth ~ underval + log(gdp) +
+              country + factor(year),
+              data = GDP)
+# Create table of just log GDP and undervalution values
+
+coef.table2 <- matrix(c((coef(summary(GR.fit2))["log(gdp)","Estimate"]),
+                        (coef(summary(GR.fit2))["log(gdp)","Std. Error"]),
+                        (coef(summary(GR.fit2))["underval","Estimate"]),
+                        (coef(summary(GR.fit2))["underval","Std. Error"])),
+                      ncol=2,
+                      byrow=TRUE)
+rownames(coef.table2) <- c("log(gdp)","underval")
+colnames(coef.table2) <- c("Estimate","Std. Error")
+coef.table2 <- as.table(coef.table2)
+print(coef.table2)
+
+```
+
+###2.b. Why Factor(year)?
+
+If year were treated as a continuous variable, the regression would explain how the passing of time affects growth rate. Treating year as a categorical variables explains how events in each year might affect growth rate.
+
+
+###2.c. Plot coefficients on year versus time
+We see a significant drop in coefficient values between 1970 and 1980, suggesting a global financial crisis occuring during these years. Futhermore, this coefficient hasn't yet breached 0, suggesting the global growth rate was still declining each year at and before 2000 (though, declining at slower rates each year).
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# 2.c. Plot the coefficients on year versus time
+
+# First, pull out the year coefficients from the regression
+year.coefs <- summary(GR.fit2)$coefficients[182:190, 1]
+
+# Create vector of years
+years <- seq(1960, 2000, 5)
+
+# plot years versus coefficients
+plot(years, year.coefs,
+     ylab = "Year Coefs.",
+     xlab = "Year")
+
+```
+
+###2.d. Expanded model...
+Controlling over years and countries does increase the coefficients of log(gdp) and underval. In this expanded model, growth rate increases by 0.002 with an increase in GDP of 1%, holding all other variables constant. Furthermore, the underval coefficient increases to 0.01, suggesting that mean growth rate increases by 0.01 by a unit increase in under-valuation index, holding all other variables constant. The expanded model results in larger coefficients for these two variables, suggesting the expanded model supports the idea of catching up and undervaluation. 
+
+##3. Does adding year and country as covariates improve model?
+###3.a. What happens with the $R^2$?
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+# Create table of R^2 and adjusted R^2 values
+
+R.table3 <- matrix(c(summary(GR.fit1)$r.squared,
+                  summary(GR.fit1)$adj.r.squared,
+                  summary(GR.fit2)$r.squared,
+                  summary(GR.fit2)$adj.r.squared),
+                      ncol=2,
+                      byrow=TRUE)
+rownames(R.table3) <- c("GR.fit1","GR.fit2")
+colnames(R.table3) <- c("R^2","Adj. R^2")
+R.table3 <- as.table(R.table3)
+print(R.table3)
+
+```
+
+From the table of $R^2$ and Adjusted $R^2$ values, we see that the expanded model does increase the $R^2$ values. These values suggest that more variance in growth rate is explained by the model.
+
+###3.b. Use leave-one our cross-validation
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, fig.align='center'}
+
+#3.b. Leave-one-out cross validation
+# Use code from Lecture 3
+
+# re-write the formulas
+small_formula = "growth ~ underval + I(log(gdp))"
+large_formula = "growth ~ underval + I(log(gdp)) + I(factor(year)) : country"
+
+small_formula <- as.formula(small_formula)
+large_formula <- as.formula(large_formula)
+
+formulae <- c(small_formula, large_formula)
+
+# Use response.name function from lecture notes
+response.name <- function(formula) {
+  var.names <- all.vars(formula)
+  return(var.names[1])
+}
+
+
+
+
+## ----kfold-cv-for-linear-models------------------------------------------
+# General function to do k-fold CV for a bunch of linear models
+  # Inputs: dataframe to fit all models on,
+    # list or vector of model formulae,
+    # number of folds of cross-validation
+  # Output: vector of cross-validated MSEs for the models
+cv.lm <- function(data, formulae, nfolds) {
+  # Strip data of NA rows
+    # ATTN: Better to check whether NAs are in variables used by the models
+  data <- na.omit(data)
+  # Make sure the formulae have type "formula"
+  formulae <- sapply(formulae, as.formula)
+  # Extract the name of the response variable from each formula
+    # ATTN: CV doesn't make a lot of sense unless these are all the same!
+  responses <- sapply(formulae, response.name)
+  names(responses) <- as.character(formulae)
+  n <- nrow(data)
+  # Assign each data point to a fold, at random
+    # see ?sample for the effect of sample(x) on a vector x
+  fold.labels <- sample(rep(1:nfolds, length.out=n))
+  mses <- matrix(NA, nrow=nfolds, ncol=length(formulae))
+  colnames <- as.character(formulae)
+  # EXERCISE: Replace the double for() loop below by defining a new
+  # function and then calling outer()
+  for (fold in 1:nfolds) {
+    test.rows <- which(fold.labels == fold)
+    train <- data[-test.rows,]
+    test <- data[test.rows,]
+    for (form in 1:length(formulae)) {
+       # Fit the model on the training data
+       current.model <- lm(formula=formulae[[form]], data=train)
+       # Generate predictions on the testing data
+       predictions <- predict(current.model, newdata=test)
+       # Get the responses on the testing data
+       test.responses <- test[,responses[form]]
+       # Calculate errors
+       test.errors <- test.responses - predictions
+       # Calculate the MSE on that fold
+       mses[fold, form] <- mean(test.errors^2)
+    }
+  }
+  return(colMeans(mses))
+}
+
+
+
+
+```
